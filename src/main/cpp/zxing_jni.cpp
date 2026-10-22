@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -22,13 +23,16 @@ void ThrowException(
         const char* className,
         const std::string& message)
 {
-    jclass clazz = env->FindClass(className);
+    jclass clazz =
+            env->FindClass(className);
 
     if (clazz != nullptr) {
+
         env->ThrowNew(
                 clazz,
                 message.c_str()
         );
+
     }
 }
 
@@ -93,7 +97,9 @@ jobject CreateDecodeResult(
 
     jbyteArray byteArray =
             env->NewByteArray(
-                    static_cast<jsize>(bytes.size())
+                    static_cast<jsize>(
+                            bytes.size()
+                    )
             );
 
     if (byteArray == nullptr) {
@@ -106,14 +112,19 @@ jobject CreateDecodeResult(
         env->SetByteArrayRegion(
                 byteArray,
                 0,
-                static_cast<jsize>(bytes.size()),
-                reinterpret_cast<const jbyte*>(bytes.data())
+                static_cast<jsize>(
+                        bytes.size()
+                ),
+                reinterpret_cast<const jbyte*>(
+                        bytes.data()
+                )
         );
 
     }
 
 
     jstring charsetString = nullptr;
+
 
     if (!charset.empty()) {
 
@@ -126,6 +137,7 @@ jobject CreateDecodeResult(
 
 
     jstring textString = nullptr;
+
 
     if (!text.empty()) {
 
@@ -142,22 +154,39 @@ jobject CreateDecodeResult(
                     clazz,
                     constructor,
                     byteArray,
-                    hasECI ? JNI_TRUE : JNI_FALSE,
-                    static_cast<jint>(eci),
+                    hasECI
+                            ? JNI_TRUE
+                            : JNI_FALSE,
+                    static_cast<jint>(
+                            eci
+                    ),
                     charsetString,
                     textString
             );
 
 
-    env->DeleteLocalRef(byteArray);
+    env->DeleteLocalRef(
+            byteArray
+    );
+
 
     if (charsetString != nullptr) {
-        env->DeleteLocalRef(charsetString);
+
+        env->DeleteLocalRef(
+                charsetString
+        );
+
     }
 
+
     if (textString != nullptr) {
-        env->DeleteLocalRef(textString);
+
+        env->DeleteLocalRef(
+                textString
+        );
+
     }
+
 
     return result;
 }
@@ -167,7 +196,7 @@ jobject CreateDecodeResult(
 // ECI parsing
 //
 // ZXing-C++ bytesECI() 返回带 ECI 标记的内容。
-// 当前我们主要处理普通的单 ECI QR。
+// 当前主要处理普通的单 ECI QR。
 // ============================================================
 
 int ExtractFirstECI(
@@ -181,17 +210,22 @@ int ExtractFirstECI(
     /*
      * ZXing-C++ 的 bytesECI() 使用：
      *
-     * '\' + 6 位 ECI 数字
+     *     '\' + 6 位 ECI 数字
      *
      * 作为 ECI 标记。
      *
      * 例如：
      *
-     * \000003
-     * \000026
-     * \000899
+     *     \000003
+     *     \000026
+     *     \000899
      */
-    for (size_t i = 0; i + 7 <= bytesECI.size(); ++i) {
+
+    for (
+            size_t i = 0;
+            i + 7 <= bytesECI.size();
+            ++i)
+    {
 
         if (bytesECI[i] != '\\') {
             continue;
@@ -202,24 +236,41 @@ int ExtractFirstECI(
 
         int value = 0;
 
-        for (size_t j = 1; j <= 6; ++j) {
 
-            uint8_t c = bytesECI[i + j];
+        for (
+                size_t j = 1;
+                j <= 6;
+                ++j)
+        {
 
-            if (c < '0' || c > '9') {
+            uint8_t c =
+                    bytesECI[
+                            i + j
+                    ];
+
+
+            if (c < '0' ||
+                c > '9')
+            {
+
                 allDigits = false;
+
                 break;
             }
 
+
             value =
                     value * 10 +
-                    static_cast<int>(c - '0');
+                    static_cast<int>(
+                            c - '0'
+                    );
         }
 
 
         if (allDigits) {
             return value;
         }
+
     }
 
 
@@ -231,7 +282,8 @@ int ExtractFirstECI(
 // ECI -> charset name
 // ============================================================
 
-std::string ECIName(int eci)
+std::string ECIName(
+        int eci)
 {
     switch (eci) {
 
@@ -269,6 +321,7 @@ std::string ECIName(int eci)
 // Render ZXing-C++ symbol to fixed-size grayscale image
 //
 // 输出：
+//
 //     0   = black
 //     255 = white
 //
@@ -281,15 +334,31 @@ std::vector<uint8_t> RenderQRCode(
         int height,
         int quietZone)
 {
-    if (symbol.empty()) {
+    /*
+     * 注意：
+     *
+     * ZXing-C++ v3.1.1 的 ImageView
+     * 没有 empty() 方法。
+     *
+     * 因此使用 data / width / height
+     * 判断 ImageView 是否有效。
+     */
+
+    if (symbol.data() == nullptr ||
+        symbol.width() <= 0 ||
+        symbol.height() <= 0)
+    {
+
         throw std::runtime_error(
                 "ZXing symbol is empty"
         );
+
     }
 
 
     const int symbolWidth =
             symbol.width();
+
 
     const int symbolHeight =
             symbol.height();
@@ -298,9 +367,11 @@ std::vector<uint8_t> RenderQRCode(
     if (symbolWidth <= 0 ||
         symbolHeight <= 0)
     {
+
         throw std::runtime_error(
                 "Invalid ZXing symbol size"
         );
+
     }
 
 
@@ -309,19 +380,25 @@ std::vector<uint8_t> RenderQRCode(
      *
      * symbol() 是二维码矩阵本身。
      */
+
     const int moduleWidth =
-            symbolWidth + quietZone * 2;
+            symbolWidth +
+            quietZone * 2;
+
 
     const int moduleHeight =
-            symbolHeight + quietZone * 2;
+            symbolHeight +
+            quietZone * 2;
 
 
     if (moduleWidth <= 0 ||
         moduleHeight <= 0)
     {
+
         throw std::runtime_error(
                 "Invalid quiet zone"
         );
+
     }
 
 
@@ -330,14 +407,20 @@ std::vector<uint8_t> RenderQRCode(
      *
      * 这样 QR module 永远不会被半个像素切割。
      */
+
     const int scaleX =
             width / moduleWidth;
+
 
     const int scaleY =
             height / moduleHeight;
 
+
     const int moduleScale =
-            std::min(scaleX, scaleY);
+            std::min(
+                    scaleX,
+                    scaleY
+            );
 
 
     if (moduleScale <= 0) {
@@ -350,17 +433,22 @@ std::vector<uint8_t> RenderQRCode(
 
 
     const int renderedWidth =
-            moduleWidth * moduleScale;
+            moduleWidth *
+            moduleScale;
+
 
     const int renderedHeight =
-            moduleHeight * moduleScale;
+            moduleHeight *
+            moduleScale;
 
 
     /*
      * 居中。
      */
+
     const int offsetX =
             (width - renderedWidth) / 2;
+
 
     const int offsetY =
             (height - renderedHeight) / 2;
@@ -376,12 +464,13 @@ std::vector<uint8_t> RenderQRCode(
     /*
      * symbol() 通常是 Lum 格式：
      *
-     * 0   = black
-     * 255 = white
+     *     0   = black
+     *     255 = white
      *
      * 对于安全性，这里不直接假定具体值，
-     * 只把 0 当成黑色，其它值当成白色。
+     * 只把小于 128 的值当成黑色。
      */
+
     const uint8_t* source =
             symbol.data();
 
@@ -389,24 +478,37 @@ std::vector<uint8_t> RenderQRCode(
     const int sourceRowStride =
             symbol.rowStride();
 
+
     const int sourcePixStride =
             symbol.pixStride();
 
 
-    for (int y = 0; y < symbolHeight; ++y) {
+    for (
+            int y = 0;
+            y < symbolHeight;
+            ++y)
+    {
 
-        for (int x = 0; x < symbolWidth; ++x) {
+        for (
+                int x = 0;
+                x < symbolWidth;
+                ++x)
+        {
 
             const uint8_t value =
                     source[
-                            y * sourceRowStride +
-                            x * sourcePixStride
+                            y *
+                            sourceRowStride
+                            +
+                            x *
+                            sourcePixStride
                     ];
 
 
             /*
              * QR symbol 中黑色 module。
              */
+
             const bool black =
                     value < 128;
 
@@ -418,16 +520,20 @@ std::vector<uint8_t> RenderQRCode(
 
             const int dstX =
                     offsetX +
-                    (quietZone + x) * moduleScale;
+                    (quietZone + x) *
+                    moduleScale;
+
 
             const int dstY =
                     offsetY +
-                    (quietZone + y) * moduleScale;
+                    (quietZone + y) *
+                    moduleScale;
 
 
-            for (int yy = 0;
-                 yy < moduleScale;
-                 ++yy)
+            for (
+                    int yy = 0;
+                    yy < moduleScale;
+                    ++yy)
             {
 
                 uint8_t* row =
@@ -435,16 +541,23 @@ std::vector<uint8_t> RenderQRCode(
                         static_cast<size_t>(
                                 dstY + yy
                         ) *
-                        static_cast<size_t>(width);
+                        static_cast<size_t>(
+                                width
+                        );
 
 
                 std::fill(
                         row + dstX,
-                        row + dstX + moduleScale,
+                        row +
+                        dstX +
+                        moduleScale,
                         0
                 );
+
             }
+
         }
+
     }
 
 
@@ -462,8 +575,11 @@ jbyteArray VectorToByteArray(
 {
     jbyteArray result =
             env->NewByteArray(
-                    static_cast<jsize>(data.size())
+                    static_cast<jsize>(
+                            data.size()
+                    )
             );
+
 
     if (result == nullptr) {
         return nullptr;
@@ -475,8 +591,12 @@ jbyteArray VectorToByteArray(
         env->SetByteArrayRegion(
                 result,
                 0,
-                static_cast<jsize>(data.size()),
-                reinterpret_cast<const jbyte*>(data.data())
+                static_cast<jsize>(
+                        data.size()
+                ),
+                reinterpret_cast<const jbyte*>(
+                        data.data()
+                )
         );
 
     }
@@ -515,7 +635,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
     }
 
 
-    if (width <= 0 || height <= 0) {
+    if (width <= 0 ||
+        height <= 0)
+    {
 
         ThrowIllegalArgument(
                 env,
@@ -542,7 +664,8 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
 
 
     const int requiredSize =
-            (height - 1) * rowStride +
+            (height - 1) *
+            rowStride +
             width * 4;
 
 
@@ -572,7 +695,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
     try {
 
         ZXing::ImageView image(
-                reinterpret_cast<const uint8_t*>(data),
+                reinterpret_cast<const uint8_t*>(
+                        data
+                ),
                 length,
                 width,
                 height,
@@ -610,6 +735,8 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
                 data,
                 JNI_ABORT
         );
+
+        data = nullptr;
 
 
         if (barcodes.empty()) {
@@ -661,11 +788,15 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
     }
     catch (const std::exception& e) {
 
-        env->ReleaseByteArrayElements(
-                rgbaArray,
-                data,
-                JNI_ABORT
-        );
+        if (data != nullptr) {
+
+            env->ReleaseByteArrayElements(
+                    rgbaArray,
+                    data,
+                    JNI_ABORT
+            );
+
+        }
 
 
         ThrowIllegalState(
@@ -673,21 +804,28 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
                 e.what()
         );
 
+
         return nullptr;
+
     }
     catch (...) {
 
-        env->ReleaseByteArrayElements(
-                rgbaArray,
-                data,
-                JNI_ABORT
-        );
+        if (data != nullptr) {
+
+            env->ReleaseByteArrayElements(
+                    rgbaArray,
+                    data,
+                    JNI_ABORT
+            );
+
+        }
 
 
         ThrowIllegalState(
                 env,
                 "Unknown native exception"
         );
+
 
         return nullptr;
     }
@@ -698,6 +836,7 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
 // Encode byte[]
 //
 // 参数：
+//
 //     data
 //     width
 //     height
@@ -706,12 +845,14 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
 //     eci
 //
 // ecLevel:
+//
 //     1 = L
 //     2 = M
 //     3 = Q
 //     4 = H
 //
 // eci:
+//
 //     3   = ISO-8859-1
 //     26  = UTF-8
 //     899 = 8-bit binary
@@ -740,7 +881,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
     }
 
 
-    if (width <= 0 || height <= 0) {
+    if (width <= 0 ||
+        height <= 0)
+    {
 
         ThrowIllegalArgument(
                 env,
@@ -762,7 +905,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
     }
 
 
-    if (ecLevel < 1 || ecLevel > 4) {
+    if (ecLevel < 1 ||
+        ecLevel > 4)
+    {
 
         ThrowIllegalArgument(
                 env,
@@ -773,7 +918,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
     }
 
 
-    if (eci < 0 || eci > 999999) {
+    if (eci < 0 ||
+        eci > 999999)
+    {
 
         ThrowIllegalArgument(
                 env,
@@ -816,40 +963,52 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
     try {
 
         /*
-         * Zint / ZXing-C++ 新 Writer API：
+         * ZXing-C++ 新 Writer API：
          *
-         * CreatorOptions options(
+         * CreatorOptions(
          *     BarcodeFormat::QRCode,
          *     "ecLevel=M,eci=3"
          * );
          */
+
         std::string options;
 
 
         /*
          * QRCode 的 ECC。
-         *
-         * 使用标准的 L/M/Q/H。
-         *
-         * ZXing-C++ 的 CreatorOptions 官方示例
-         * 也支持 ecLevel("M") / ecLevel("Q") / ecLevel("H")。
          */
+
         switch (ecLevel) {
 
             case 1:
-                options += "ecLevel=L";
+
+                options +=
+                        "ecLevel=L";
+
                 break;
+
 
             case 2:
-                options += "ecLevel=M";
+
+                options +=
+                        "ecLevel=M";
+
                 break;
+
 
             case 3:
-                options += "ecLevel=Q";
+
+                options +=
+                        "ecLevel=Q";
+
                 break;
 
+
             case 4:
-                options += "ecLevel=H";
+
+                options +=
+                        "ecLevel=H";
+
                 break;
         }
 
@@ -859,12 +1018,18 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
          *
          * 例如：
          *
-         * eci=3
-         * eci=26
-         * eci=899
+         *     eci=3
+         *     eci=26
+         *     eci=899
          */
-        options += ",eci=";
-        options += std::to_string(eci);
+
+        options +=
+                ",eci=";
+
+        options +=
+                std::to_string(
+                        eci
+                );
 
 
         ZXing::CreatorOptions creatorOptions(
@@ -880,10 +1045,15 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
          *
          * 不经过 Java String。
          */
+
         const ZXing::Barcode barcode =
                 ZXing::CreateBarcodeFromBytes(
-                        reinterpret_cast<const uint8_t*>(data),
-                        static_cast<int>(dataLength),
+                        reinterpret_cast<const uint8_t*>(
+                                data
+                        ),
+                        static_cast<int>(
+                                dataLength
+                        ),
                         creatorOptions
                 );
 
@@ -891,6 +1061,7 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
         /*
          * Java byte[] 不再使用。
          */
+
         env->ReleaseByteArrayElements(
                 dataArray,
                 data,
@@ -914,11 +1085,25 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
         /*
          * 取得二维码 module matrix。
          */
+
         const ZXing::ImageView symbol =
                 barcode.symbol();
 
 
-        if (symbol.empty()) {
+        /*
+         * 重要：
+         *
+         * ZXing-C++ v3.1.1 的 ImageView
+         * 没有 empty() 方法。
+         *
+         * 使用 data / width / height
+         * 判断是否有效。
+         */
+
+        if (symbol.data() == nullptr ||
+            symbol.width() <= 0 ||
+            symbol.height() <= 0)
+        {
 
             ThrowIllegalState(
                     env,
@@ -930,9 +1115,10 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
 
 
         /*
-         * 渲染为固定 width x height 的
-         * 8-bit grayscale byte[]。
+         * 渲染为固定 width x height
+         * 的 8-bit grayscale byte[]。
          */
+
         const std::vector<uint8_t> image =
                 RenderQRCode(
                         symbol,
@@ -966,7 +1152,9 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
                 e.what()
         );
 
+
         return nullptr;
+
     }
     catch (...) {
 
@@ -985,6 +1173,7 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
                 env,
                 "Unknown native exception"
         );
+
 
         return nullptr;
     }
