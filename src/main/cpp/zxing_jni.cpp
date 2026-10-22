@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "ZXing/ZXingCpp.h"
+#include "ZXingCpp.h"
 
 namespace {
 
