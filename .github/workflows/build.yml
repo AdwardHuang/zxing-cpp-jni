@@ -1,0 +1,123 @@
+name: Build ZXing-C++ JNI
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  native:
+    name: Native ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x86_64
+            shell: pwsh
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+            shell: bash
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Configure
+        shell: ${{ matrix.shell }}
+        run: cmake -S src/main/cpp -B build/native -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build
+        shell: ${{ matrix.shell }}
+        run: cmake --build build/native --config Release --parallel
+
+      - name: Install
+        shell: ${{ matrix.shell }}
+        run: cmake --install build/native --config Release
+
+      - name: Locate native library
+        shell: ${{ matrix.shell }}
+        run: |
+          if ("${{ runner.os }}" -eq "Windows") {
+            New-Item -ItemType Directory -Force -Path "native/${{ matrix.platform }}" | Out-Null
+            Copy-Item "build/install/zxing_jni.dll" "native/${{ matrix.platform }}/zxing_jni.dll"
+          } else {
+            mkdir -p "native/${{ matrix.platform }}"
+            cp "build/install/libzxing_jni.so" "native/${{ matrix.platform }}/libzxing_jni.so"
+          }
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: native/${{ matrix.platform }}
+          if-no-files-found: error
+
+  package:
+    name: Package Java JAR
+    needs: native
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Download Windows native library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows-x86_64
+          path: src/main/resources/native/windows-x86_64
+
+      - name: Download Linux native library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x86_64
+          path: src/main/resources/native/linux-x86_64
+
+      - name: Build JAR
+        run: mvn -B -DskipTests package
+
+      - name: Build source archive
+        run: |
+          mkdir -p release
+          cp target/*.jar release/
+          cp README.md LICENSE THIRD_PARTY_LICENSES.md release/
+          cd release
+          zip -r zxing-cpp-jni-${GITHUB_SHA::7}.zip .
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: zxing-cpp-jni-package
+          path: |
+            target/*.jar
+            release/*.zip
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/*.jar
+            release/*.zip
+          generate_release_notes: true
