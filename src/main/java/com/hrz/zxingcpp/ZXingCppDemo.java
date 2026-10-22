@@ -1,77 +1,77 @@
-private static void testAllBytes()
-        throws Exception
-{
-    System.out.println(
-            "========== All bytes 0x00 ~ 0xFF =========="
-    );
+package com.hrz.zxingcpp;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
 
-    byte[] source =
-            new byte[256];
+/**
+ * Simple command-line demo.
+ */
+public final class ZXingCppDemo {
 
-
-    for (int i = 0;
-         i < 256;
-         i++)
-    {
-        source[i] =
-                (byte) i;
+    private ZXingCppDemo() {
     }
 
+    public static void main(String[] args) throws Exception {
 
-    BufferedImage image =
-            ZXingCpp.encodeImage(
-                    source,
-                    600,
-                    600
+        if (args.length != 1) {
+            System.err.println(
+                    "Usage: java -cp zxing-cpp-jni.jar " +
+                    "com.hrz.zxingcpp.ZXingCppDemo <image>"
             );
 
+            System.exit(2);
+        }
 
-    ZXingCpp.DecodeResult result =
-            ZXingCpp.decodeBytes(
-                    image
+
+        BufferedImage image =
+                ImageIO.read(
+                        new File(args[0])
+                );
+
+
+        if (image == null) {
+            throw new IllegalArgumentException(
+                    "Unsupported image: " + args[0]
             );
+        }
 
 
-    if (result == null) {
-
-        throw new IllegalStateException(
-                "All-bytes decode failed"
+        System.out.println(
+                "ZXing-C++ version: " +
+                ZXingCpp.version()
         );
 
-    }
+
+        byte[] bytes =
+                ZXingCpp.decodeBytes(
+                        image
+                );
 
 
-    boolean equals =
-            Arrays.equals(
-                    source,
-                    result.getBytes()
+        if (bytes == null) {
+
+            System.out.println(
+                    "No QR code found."
             );
 
-
-    System.out.println(
-            "ECI      : "
-                    + result.getECI()
-    );
+            return;
+        }
 
 
-    System.out.println(
-            "Bytes    : "
-                    + result.getBytes().length
-    );
-
-
-    System.out.println(
-            "Equals   : "
-                    + equals
-    );
-
-
-    if (!equals) {
-
-        throw new IllegalStateException(
-                "0x00~0xFF mismatch"
+        System.out.println(
+                "Decoded bytes: " +
+                bytes.length
         );
 
+
+        System.out.println(
+                "ISO-8859-1: " +
+                new String(
+                        bytes,
+                        StandardCharsets.ISO_8859_1
+                )
+        );
     }
 }
