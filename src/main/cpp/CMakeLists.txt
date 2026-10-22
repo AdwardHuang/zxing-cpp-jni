@@ -4,9 +4,9 @@ project(zxing_jni LANGUAGES CXX)
 
 include(FetchContent)
 
-# ---------------------------------------------------------
+# =========================================================
 # Java / JNI
-# ---------------------------------------------------------
+# =========================================================
 
 if (NOT DEFINED ENV{JAVA_HOME})
     message(FATAL_ERROR "JAVA_HOME is not set")
@@ -28,9 +28,9 @@ if (NOT EXISTS "${JAVA_HOME}/include/jni.h")
     )
 endif()
 
-# ---------------------------------------------------------
+# =========================================================
 # ZXing-C++
-# ---------------------------------------------------------
+# =========================================================
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL
     "Build ZXing-C++ as static library"
@@ -86,9 +86,9 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(zxing_cpp)
 
-# ---------------------------------------------------------
+# =========================================================
 # Check ZXing target
-# ---------------------------------------------------------
+# =========================================================
 
 if (NOT TARGET ZXing)
     message(FATAL_ERROR
@@ -98,30 +98,47 @@ endif()
 
 message(STATUS "ZXing target found")
 
-# ---------------------------------------------------------
+# =========================================================
 # JNI library
-# ---------------------------------------------------------
+# =========================================================
 
 add_library(zxing_jni SHARED
     zxing_jni.cpp
 )
 
+# JNI headers
 target_include_directories(zxing_jni PRIVATE
     "${JAVA_HOME}/include"
     "${JNI_OS_INCLUDE}"
 )
 
+# ZXing headers
+#
+# ZXingCpp.h is located in:
+#
+#   core/src/ZXing/ZXingCpp.h
+#
+# Therefore the include root must be:
+#
+#   core/src
+#
+target_include_directories(zxing_jni PRIVATE
+    "${zxing_cpp_SOURCE_DIR}/core/src"
+)
+
+# Link ZXing-C++
 target_link_libraries(zxing_jni PRIVATE
     ZXing::ZXing
 )
 
+# C++20
 target_compile_features(zxing_jni PRIVATE
     cxx_std_20
 )
 
-# ---------------------------------------------------------
+# =========================================================
 # Compiler options
-# ---------------------------------------------------------
+# =========================================================
 
 if (MSVC)
 
@@ -137,17 +154,17 @@ else()
 
 endif()
 
-# ---------------------------------------------------------
-# Output name
-# ---------------------------------------------------------
+# =========================================================
+# Output
+# =========================================================
 
 set_target_properties(zxing_jni PROPERTIES
     OUTPUT_NAME "zxing_jni"
 )
 
-# ---------------------------------------------------------
+# =========================================================
 # Install
-# ---------------------------------------------------------
+# =========================================================
 
 install(
     TARGETS zxing_jni
