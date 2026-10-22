@@ -1,174 +1,258 @@
-cmake_minimum_required(VERSION 3.21)
+name: Build ZXing-C++ JNI
 
-project(zxing_jni LANGUAGES CXX)
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
 
-include(FetchContent)
+  pull_request:
 
-# =========================================================
-# Java / JNI
-# =========================================================
+  workflow_dispatch:
 
-if (NOT DEFINED ENV{JAVA_HOME})
-    message(FATAL_ERROR "JAVA_HOME is not set")
-endif()
+permissions:
+  contents: write
 
-set(JAVA_HOME "$ENV{JAVA_HOME}")
+jobs:
 
-message(STATUS "JAVA_HOME=${JAVA_HOME}")
+  native:
 
-if (WIN32)
-    set(JNI_OS_INCLUDE "${JAVA_HOME}/include/win32")
-else()
-    set(JNI_OS_INCLUDE "${JAVA_HOME}/include/linux")
-endif()
+    name: Native ${{ matrix.platform }}
 
-if (NOT EXISTS "${JAVA_HOME}/include/jni.h")
-    message(FATAL_ERROR
-        "jni.h not found: ${JAVA_HOME}/include/jni.h"
-    )
-endif()
+    strategy:
+      fail-fast: false
 
-# =========================================================
-# ZXing-C++
-# =========================================================
+      matrix:
 
-set(BUILD_SHARED_LIBS OFF CACHE BOOL
-    "Build ZXing-C++ as static library"
-    FORCE
-)
+        include:
 
-set(ZXING_READERS ON CACHE BOOL
-    "Build ZXing readers"
-    FORCE
-)
+          - os: windows-2022
+            platform: windows-x86_64
 
-set(ZXING_WRITERS OFF CACHE STRING
-    "Build ZXing writers"
-    FORCE
-)
+          - os: ubuntu-22.04
+            platform: linux-x86_64
 
-set(ZXING_EXAMPLES OFF CACHE BOOL
-    "Build examples"
-    FORCE
-)
+    runs-on: ${{ matrix.os }}
 
-set(ZXING_EXAMPLES_QT OFF CACHE BOOL
-    "Build Qt examples"
-    FORCE
-)
+    steps:
 
-set(ZXING_UNIT_TESTS OFF CACHE BOOL
-    "Build unit tests"
-    FORCE
-)
+      # --------------------------------------------------
+      # Checkout
+      # --------------------------------------------------
 
-set(ZXING_BLACKBOX_TESTS OFF CACHE BOOL
-    "Build blackbox tests"
-    FORCE
-)
+      - name: Checkout
+        uses: actions/checkout@v5
 
-set(ZXING_C_API OFF CACHE BOOL
-    "Build C API"
-    FORCE
-)
+      # --------------------------------------------------
+      # JDK
+      # --------------------------------------------------
 
-set(ZXING_PYTHON_MODULE OFF CACHE BOOL
-    "Build Python module"
-    FORCE
-)
+      - name: Setup JDK 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
 
-FetchContent_Declare(
-    zxing_cpp
-    GIT_REPOSITORY https://github.com/zxing-cpp/zxing-cpp.git
-    GIT_TAG v3.1.1
-    GIT_SHALLOW TRUE
-)
+      # --------------------------------------------------
+      # Show environment
+      # --------------------------------------------------
 
-FetchContent_MakeAvailable(zxing_cpp)
+      - name: Show environment
+        shell: bash
+        run: |
+          echo "OS: $RUNNER_OS"
+          echo "JAVA_HOME: $JAVA_HOME"
+          java -version
+          cmake --version
 
-# =========================================================
-# Check ZXing target
-# =========================================================
+      # --------------------------------------------------
+      # Configure
+      # --------------------------------------------------
 
-if (NOT TARGET ZXing)
-    message(FATAL_ERROR
-        "ZXing target was not created"
-    )
-endif()
+      - name: Configure
+        run: >
+          cmake
+          -S src/main/cpp
+          -B build/native
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/build/install
 
-message(STATUS "ZXing target found")
+      # --------------------------------------------------
+      # Build
+      # --------------------------------------------------
 
-# =========================================================
-# JNI library
-# =========================================================
+      - name: Build
+        run: >
+          cmake
+          --build build/native
+          --config Release
+          --parallel
 
-add_library(zxing_jni SHARED
-    zxing_jni.cpp
-)
+      # --------------------------------------------------
+      # Install
+      # --------------------------------------------------
 
-# JNI headers
-target_include_directories(zxing_jni PRIVATE
-    "${JAVA_HOME}/include"
-    "${JNI_OS_INCLUDE}"
-)
+      - name: Install
+        run: >
+          cmake
+          --install build/native
+          --config Release
 
-# ZXing headers
-#
-# ZXingCpp.h is located in:
-#
-#   core/src/ZXing/ZXingCpp.h
-#
-# Therefore the include root must be:
-#
-#   core/src
-#
-target_include_directories(zxing_jni PRIVATE
-    "${zxing_cpp_SOURCE_DIR}/core/src"
-)
+      # --------------------------------------------------
+      # Check output
+      # --------------------------------------------------
 
-# Link ZXing-C++
-target_link_libraries(zxing_jni PRIVATE
-    ZXing::ZXing
-)
+      - name: List install directory
+        shell: bash
+        run: |
+          echo "===== build/install ====="
+          find build/install -type f -print
 
-# C++20
-target_compile_features(zxing_jni PRIVATE
-    cxx_std_20
-)
+      # --------------------------------------------------
+      # Prepare artifact
+      # --------------------------------------------------
 
-# =========================================================
-# Compiler options
-# =========================================================
+      - name: Prepare Windows native library
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path "native/${{ matrix.platform }}" |
+            Out-Null
 
-if (MSVC)
+          Copy-Item `
+            "build/install/zxing_jni.dll" `
+            "native/${{ matrix.platform }}/zxing_jni.dll"
 
-    target_compile_options(zxing_jni PRIVATE
-        /utf-8
-    )
+      - name: Prepare Linux native library
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p "native/${{ matrix.platform }}"
 
-else()
+          cp \
+            "build/install/libzxing_jni.so" \
+            "native/${{ matrix.platform }}/libzxing_jni.so"
 
-    target_compile_options(zxing_jni PRIVATE
-        -fvisibility=hidden
-    )
+      # --------------------------------------------------
+      # Upload
+      # --------------------------------------------------
 
-endif()
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: native/${{ matrix.platform }}
+          if-no-files-found: error
 
-# =========================================================
-# Output
-# =========================================================
 
-set_target_properties(zxing_jni PROPERTIES
-    OUTPUT_NAME "zxing_jni"
-)
+  # ======================================================
+  # Java package
+  # ======================================================
 
-# =========================================================
-# Install
-# =========================================================
+  package:
 
-install(
-    TARGETS zxing_jni
-    RUNTIME DESTINATION .
-    LIBRARY DESTINATION .
-    ARCHIVE DESTINATION .
-)
+    name: Package Java JAR
+
+    needs: native
+
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup JDK 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
+          cache: maven
+
+      # --------------------------------------------------
+      # Download Windows DLL
+      # --------------------------------------------------
+
+      - name: Download Windows native library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows-x86_64
+          path: src/main/resources/native/windows-x86_64
+
+      # --------------------------------------------------
+      # Download Linux SO
+      # --------------------------------------------------
+
+      - name: Download Linux native library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x86_64
+          path: src/main/resources/native/linux-x86_64
+
+      # --------------------------------------------------
+      # Build Maven
+      # --------------------------------------------------
+
+      - name: Build JAR
+        run: |
+          mvn -B -DskipTests package
+
+      # --------------------------------------------------
+      # Show result
+      # --------------------------------------------------
+
+      - name: List package
+        run: |
+          echo "===== target ====="
+          find target -type f -print
+
+      # --------------------------------------------------
+      # Package release
+      # --------------------------------------------------
+
+      - name: Build release archive
+        run: |
+          mkdir -p release
+
+          cp target/*.jar release/
+
+          cp README.md \
+             LICENSE \
+             THIRD_PARTY_LICENSES.md \
+             release/
+
+          cd release
+
+          zip \
+            -r \
+            "zxing-cpp-jni-${GITHUB_SHA::7}.zip" \
+            .
+
+      # --------------------------------------------------
+      # Upload artifact
+      # --------------------------------------------------
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: zxing-cpp-jni-package
+          path: |
+            target/*.jar
+            release/*.zip
+
+      # --------------------------------------------------
+      # GitHub Release
+      # --------------------------------------------------
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/*.jar
+            release/*.zip
+          generate_release_notes: true
