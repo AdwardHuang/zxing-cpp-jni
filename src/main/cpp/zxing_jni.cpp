@@ -3,227 +3,361 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <vector>
 
-#include "ZXingCpp.h"
-#include "CharacterSet.h"
-#include "CreateBarcode.h"
-#include "ECI.h"
+#include "ZXing/ZXingCpp.h"
 
 
-namespace {
+namespace
+{
 
+// ============================================================
+// Java exception helpers
+// ============================================================
 
-/**
- * 向 Java 抛出异常。
- */
-void ThrowJavaException(
+void ThrowException(
         JNIEnv* env,
         const char* className,
         const std::string& message)
 {
-    jclass cls = env->FindClass(className);
+    jclass clazz = env->FindClass(className);
 
-    if (cls != nullptr) {
+    if (clazz != nullptr) {
         env->ThrowNew(
-                cls,
+                clazz,
                 message.c_str()
         );
     }
 }
 
 
-/**
- * 将 ZXing-C++ 的 CharacterSet 转换成 Java Charset 可识别的名称。
- */
-std::string CharacterSetName(ZXing::ECI eci)
+void ThrowIllegalArgument(
+        JNIEnv* env,
+        const std::string& message)
 {
-    const auto characterSet =
-            ZXing::ToCharacterSet(eci);
-
-    if (characterSet ==
-        ZXing::CharacterSet::Unknown) {
-
-        return {};
-    }
-
-    return ZXing::ToString(
-            characterSet
+    ThrowException(
+            env,
+            "java/lang/IllegalArgumentException",
+            message
     );
 }
 
 
-/**
- * 从 ZXing-C++ 的 bytesECI() 中提取第一个 ECI。
- *
- * ZXing-C++ v3.1.1 的 bytesECI() 形式例如：
- *
- *     ]Q3\000026...
- *
- * 这里寻找：
- *
- *     \ + 6 位数字
- *
- * 注意：
- *
- * 这里只提取第一个 ECI。
- */
+void ThrowIllegalState(
+        JNIEnv* env,
+        const std::string& message)
+{
+    ThrowException(
+            env,
+            "java/lang/IllegalStateException",
+            message
+    );
+}
+
+
+// ============================================================
+// Java DecodeResult helper
+// ============================================================
+
+jobject CreateDecodeResult(
+        JNIEnv* env,
+        const std::vector<uint8_t>& bytes,
+        bool hasECI,
+        int eci,
+        const std::string& charset,
+        const std::string& text)
+{
+    jclass clazz =
+            env->FindClass(
+                    "com/hrz/zxingcpp/ZXingCpp$DecodeResult"
+            );
+
+    if (clazz == nullptr) {
+        return nullptr;
+    }
+
+
+    jmethodID constructor =
+            env->GetMethodID(
+                    clazz,
+                    "<init>",
+                    "([BZILjava/lang/String;Ljava/lang/String;)V"
+            );
+
+    if (constructor == nullptr) {
+        return nullptr;
+    }
+
+
+    jbyteArray byteArray =
+            env->NewByteArray(
+                    static_cast<jsize>(bytes.size())
+            );
+
+    if (byteArray == nullptr) {
+        return nullptr;
+    }
+
+
+    if (!bytes.empty()) {
+
+        env->SetByteArrayRegion(
+                byteArray,
+                0,
+                static_cast<jsize>(bytes.size()),
+                reinterpret_cast<const jbyte*>(bytes.data())
+        );
+
+    }
+
+
+    jstring charsetString = nullptr;
+
+    if (!charset.empty()) {
+
+        charsetString =
+                env->NewStringUTF(
+                        charset.c_str()
+                );
+
+    }
+
+
+    jstring textString = nullptr;
+
+    if (!text.empty()) {
+
+        textString =
+                env->NewStringUTF(
+                        text.c_str()
+                );
+
+    }
+
+
+    jobject result =
+            env->NewObject(
+                    clazz,
+                    constructor,
+                    byteArray,
+                    hasECI ? JNI_TRUE : JNI_FALSE,
+                    static_cast<jint>(eci),
+                    charsetString,
+                    textString
+            );
+
+
+    env->DeleteLocalRef(byteArray);
+
+    if (charsetString != nullptr) {
+        env->DeleteLocalRef(charsetString);
+    }
+
+    if (textString != nullptr) {
+        env->DeleteLocalRef(textString);
+    }
+
+    return result;
+}
+
+
+// ============================================================
+// ECI parsing
+//
+// ZXing-C++ bytesECI() 返回带 ECI 标记的内容。
+// 当前我们主要处理普通的单 ECI QR。
+// ============================================================
+
 int ExtractFirstECI(
         const std::vector<uint8_t>& bytesECI)
 {
-    for (size_t i = 0;
-         i < bytesECI.size();
-         ++i) {
+    if (bytesECI.empty()) {
+        return -1;
+    }
+
+
+    /*
+     * ZXing-C++ 的 bytesECI() 使用：
+     *
+     * '\' + 6 位 ECI 数字
+     *
+     * 作为 ECI 标记。
+     *
+     * 例如：
+     *
+     * \000003
+     * \000026
+     * \000899
+     */
+    for (size_t i = 0; i + 7 <= bytesECI.size(); ++i) {
 
         if (bytesECI[i] != '\\') {
             continue;
         }
 
-        if (i + 6 >= bytesECI.size()) {
-            continue;
-        }
 
-        bool digits = true;
+        bool allDigits = true;
+
         int value = 0;
 
-        for (size_t j = 1;
-             j <= 6;
-             ++j) {
+        for (size_t j = 1; j <= 6; ++j) {
 
-            const uint8_t c =
-                    bytesECI[i + j];
+            uint8_t c = bytesECI[i + j];
 
             if (c < '0' || c > '9') {
-                digits = false;
+                allDigits = false;
                 break;
             }
 
             value =
-                    value * 10
-                    + (c - '0');
+                    value * 10 +
+                    static_cast<int>(c - '0');
         }
 
-        if (digits) {
+
+        if (allDigits) {
             return value;
         }
     }
+
 
     return -1;
 }
 
 
-/**
- * 将 ZXing-C++ 生成的 symbol 渲染成指定大小的灰度图。
- *
- * 输入：
- *
- *     symbol
- *         ZXing-C++ 生成的二维码矩阵
- *
- * 输出：
- *
- *     pixels
- *         width * height
- *
- *         0   = 黑色
- *         255 = 白色
- *
- * 特点：
- *
- * 1. 输出尺寸严格等于 width * height
- * 2. QR module 使用整数倍缩放
- * 3. 保留 quiet zone
- * 4. 二维码居中
- */
+// ============================================================
+// ECI -> charset name
+// ============================================================
+
+std::string ECIName(int eci)
+{
+    switch (eci) {
+
+        case 3:
+            return "ISO-8859-1";
+
+        case 20:
+            return "Shift_JIS";
+
+        case 26:
+            return "UTF-8";
+
+        case 28:
+            return "Big5";
+
+        case 29:
+            return "ISO-8859-1";
+
+        case 30:
+            return "EUC-KR";
+
+        case 37:
+            return "ISO-8859-1";
+
+        case 899:
+            return "8-bit binary";
+
+        default:
+            return "";
+    }
+}
+
+
+// ============================================================
+// Render ZXing-C++ symbol to fixed-size grayscale image
+//
+// 输出：
+//     0   = black
+//     255 = white
+//
+// 采用整数 moduleScale，避免二维码模块被缩放成非整数像素。
+// ============================================================
+
 std::vector<uint8_t> RenderQRCode(
         const ZXing::ImageView& symbol,
         int width,
         int height,
         int quietZone)
 {
-    if (!symbol.data()) {
+    if (symbol.empty()) {
         throw std::runtime_error(
-                "ZXing-C++ returned empty QR symbol"
+                "ZXing symbol is empty"
         );
     }
 
-    if (symbol.width() <= 0 ||
-        symbol.height() <= 0) {
 
-        throw std::runtime_error(
-                "ZXing-C++ returned invalid QR symbol"
-        );
-    }
-
-    if (width <= 0 ||
-        height <= 0) {
-
-        throw std::invalid_argument(
-                "Invalid output image size"
-        );
-    }
-
-    if (quietZone < 0) {
-        quietZone = 0;
-    }
-
-    /*
-     * QR Code 正常情况下是正方形。
-     */
     const int symbolWidth =
             symbol.width();
 
     const int symbolHeight =
             symbol.height();
 
-    /*
-     * 可用于二维码模块的区域。
-     */
-    const int availableWidth =
-            width - quietZone * 2;
 
-    const int availableHeight =
-            height - quietZone * 2;
-
-    if (availableWidth <= 0 ||
-        availableHeight <= 0) {
-
-        throw std::invalid_argument(
-                "Image size is too small for quiet zone"
+    if (symbolWidth <= 0 ||
+        symbolHeight <= 0)
+    {
+        throw std::runtime_error(
+                "Invalid ZXing symbol size"
         );
     }
 
+
     /*
-     * 为了避免二维码模块被非整数缩放，
-     * 使用整数 moduleScale。
+     * 实际二维码模块数。
+     *
+     * symbol() 是二维码矩阵本身。
      */
+    const int moduleWidth =
+            symbolWidth + quietZone * 2;
+
+    const int moduleHeight =
+            symbolHeight + quietZone * 2;
+
+
+    if (moduleWidth <= 0 ||
+        moduleHeight <= 0)
+    {
+        throw std::runtime_error(
+                "Invalid quiet zone"
+        );
+    }
+
+
+    /*
+     * 使用相同的整数 scale。
+     *
+     * 这样 QR module 永远不会被半个像素切割。
+     */
+    const int scaleX =
+            width / moduleWidth;
+
+    const int scaleY =
+            height / moduleHeight;
+
     const int moduleScale =
-            std::min(
-                    availableWidth / symbolWidth,
-                    availableHeight / symbolHeight
-            );
+            std::min(scaleX, scaleY);
+
 
     if (moduleScale <= 0) {
-        throw std::invalid_argument(
-                "Image size is too small for QR Code"
+
+        throw std::runtime_error(
+                "Target image is too small for QR code"
         );
+
     }
 
+
     const int renderedWidth =
-            symbolWidth * moduleScale;
+            moduleWidth * moduleScale;
 
     const int renderedHeight =
-            symbolHeight * moduleScale;
+            moduleHeight * moduleScale;
+
 
     /*
-     * 将整个二维码居中。
-     *
-     * 注意：
-     *
-     * quietZone 是最小 quiet zone。
-     * 如果目标尺寸还有多余空间，
-     * 会平均分布到四周。
+     * 居中。
      */
     const int offsetX =
             (width - renderedWidth) / 2;
@@ -231,88 +365,135 @@ std::vector<uint8_t> RenderQRCode(
     const int offsetY =
             (height - renderedHeight) / 2;
 
-    const size_t pixelCount =
-            static_cast<size_t>(width)
-            * static_cast<size_t>(height);
 
-    std::vector<uint8_t> pixels(
-            pixelCount,
+    std::vector<uint8_t> output(
+            static_cast<size_t>(width) *
+            static_cast<size_t>(height),
             255
     );
 
-    /*
-     * ImageView 的 symbol() 是 Lum 图像。
-     *
-     * 0   = 黑色
-     * 非0 = 白色
-     */
-    for (int sy = 0;
-         sy < symbolHeight;
-         ++sy) {
 
-        for (int sx = 0;
-             sx < symbolWidth;
-             ++sx) {
+    /*
+     * symbol() 通常是 Lum 格式：
+     *
+     * 0   = black
+     * 255 = white
+     *
+     * 对于安全性，这里不直接假定具体值，
+     * 只把 0 当成黑色，其它值当成白色。
+     */
+    const uint8_t* source =
+            symbol.data();
+
+
+    const int sourceRowStride =
+            symbol.rowStride();
+
+    const int sourcePixStride =
+            symbol.pixStride();
+
+
+    for (int y = 0; y < symbolHeight; ++y) {
+
+        for (int x = 0; x < symbolWidth; ++x) {
 
             const uint8_t value =
-                    *symbol.data(sx, sy);
+                    source[
+                            y * sourceRowStride +
+                            x * sourcePixStride
+                    ];
 
-            if (value == 0) {
 
-                const int startX =
-                        offsetX
-                        + sx * moduleScale;
+            /*
+             * QR symbol 中黑色 module。
+             */
+            const bool black =
+                    value < 128;
 
-                const int startY =
-                        offsetY
-                        + sy * moduleScale;
 
-                for (int dy = 0;
-                     dy < moduleScale;
-                     ++dy) {
+            if (!black) {
+                continue;
+            }
 
-                    const size_t rowOffset =
-                            static_cast<size_t>(
-                                    startY + dy
-                            )
-                            * static_cast<size_t>(
-                                    width
-                            );
 
-                    for (int dx = 0;
-                         dx < moduleScale;
-                         ++dx) {
+            const int dstX =
+                    offsetX +
+                    (quietZone + x) * moduleScale;
 
-                        pixels[
-                                rowOffset
-                                + static_cast<size_t>(
-                                        startX + dx
-                                )
-                        ] = 0;
-                    }
-                }
+            const int dstY =
+                    offsetY +
+                    (quietZone + y) * moduleScale;
+
+
+            for (int yy = 0;
+                 yy < moduleScale;
+                 ++yy)
+            {
+
+                uint8_t* row =
+                        output.data() +
+                        static_cast<size_t>(
+                                dstY + yy
+                        ) *
+                        static_cast<size_t>(width);
+
+
+                std::fill(
+                        row + dstX,
+                        row + dstX + moduleScale,
+                        0
+                );
             }
         }
     }
 
-    return pixels;
+
+    return output;
 }
 
 
-} // namespace
+// ============================================================
+// byte[] -> Java byte[]
+// ============================================================
+
+jbyteArray VectorToByteArray(
+        JNIEnv* env,
+        const std::vector<uint8_t>& data)
+{
+    jbyteArray result =
+            env->NewByteArray(
+                    static_cast<jsize>(data.size())
+            );
+
+    if (result == nullptr) {
+        return nullptr;
+    }
 
 
-extern "C" {
+    if (!data.empty()) {
+
+        env->SetByteArrayRegion(
+                result,
+                0,
+                static_cast<jsize>(data.size()),
+                reinterpret_cast<const jbyte*>(data.data())
+        );
+
+    }
 
 
-/**
- * ============================================================
- * QrFT / OpenRQ
- *
- * Buffered RGBA -> raw bytes
- * ============================================================
- */
-JNIEXPORT jbyteArray JNICALL
+    return result;
+}
+
+}
+
+
+// ============================================================
+// Decode
+// ============================================================
+
+extern "C"
+JNIEXPORT jobject JNICALL
 Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
         JNIEnv* env,
         jclass,
@@ -325,90 +506,97 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
 {
     if (rgbaArray == nullptr) {
 
-        ThrowJavaException(
+        ThrowIllegalArgument(
                 env,
-                "java/lang/NullPointerException",
-                "rgba"
+                "rgba == null"
         );
 
         return nullptr;
     }
 
-    if (width <= 0 ||
-        height <= 0 ||
-        rowStride < width * 4) {
 
-        ThrowJavaException(
+    if (width <= 0 || height <= 0) {
+
+        ThrowIllegalArgument(
                 env,
-                "java/lang/IllegalArgumentException",
-                "Invalid image dimensions or rowStride"
+                "width/height must be > 0"
         );
 
         return nullptr;
     }
+
 
     const jsize length =
             env->GetArrayLength(
                     rgbaArray
             );
 
-    const jlong required =
-            static_cast<jlong>(
-                    rowStride
-            ) * height;
 
-    if (length < required) {
+    const int expectedStride =
+            width * 4;
 
-        ThrowJavaException(
+
+    if (rowStride <= 0) {
+        rowStride = expectedStride;
+    }
+
+
+    const int requiredSize =
+            (height - 1) * rowStride +
+            width * 4;
+
+
+    if (length < requiredSize) {
+
+        ThrowIllegalArgument(
                 env,
-                "java/lang/IllegalArgumentException",
-                "RGBA array is smaller than rowStride * height"
+                "RGBA buffer is smaller than image"
         );
 
         return nullptr;
     }
 
-    jbyte* raw =
+
+    jbyte* data =
             env->GetByteArrayElements(
                     rgbaArray,
                     nullptr
             );
 
-    if (raw == nullptr) {
+
+    if (data == nullptr) {
         return nullptr;
     }
 
-    bool released = false;
 
     try {
 
-        const auto* pixels =
-                reinterpret_cast<const uint8_t*>(
-                        raw
-                );
-
         ZXing::ImageView image(
-                pixels,
+                reinterpret_cast<const uint8_t*>(data),
+                length,
                 width,
                 height,
                 ZXing::ImageFormat::RGBA,
-                rowStride
+                rowStride,
+                4
         );
+
 
         auto options =
                 ZXing::ReaderOptions()
-                        .formats(
-                                ZXing::BarcodeFormat::QRCode
-                        )
-                        .tryRotate(
-                                tryRotate == JNI_TRUE
-                        )
-                        .tryInvert(
-                                tryInvert == JNI_TRUE
-                        )
-                        .tryDownscale(true)
-                        .maxNumberOfSymbols(1)
-                        .returnErrors(false);
+                    .formats(
+                            ZXing::BarcodeFormat::QRCode
+                    )
+                    .tryRotate(
+                            tryRotate == JNI_TRUE
+                    )
+                    .tryInvert(
+                            tryInvert == JNI_TRUE
+                    )
+                    .tryDownscale(true)
+                    .maxNumberOfSymbols(1)
+                    .returnErrors(false);
+
 
         auto barcodes =
                 ZXing::ReadBarcodes(
@@ -416,87 +604,89 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
                         options
                 );
 
+
         env->ReleaseByteArrayElements(
                 rgbaArray,
-                raw,
+                data,
                 JNI_ABORT
         );
 
-        released = true;
 
-        for (const auto& barcode : barcodes) {
+        if (barcodes.empty()) {
+            return nullptr;
+        }
 
-            if (!barcode.isValid()) {
-                continue;
-            }
 
-            const auto& bytes =
-                    barcode.bytes();
+        const auto& barcode =
+                barcodes.front();
 
-            jbyteArray result =
-                    env->NewByteArray(
-                            static_cast<jsize>(
-                                    bytes.size()
-                            )
-                    );
 
-            if (result == nullptr) {
-                return nullptr;
-            }
+        const auto& bytes =
+                barcode.bytes();
 
-            if (!bytes.empty()) {
 
-                env->SetByteArrayRegion(
-                        result,
-                        0,
-                        static_cast<jsize>(
-                                bytes.size()
-                        ),
-                        reinterpret_cast<const jbyte*>(
-                                bytes.data()
-                        )
+        const bool hasECI =
+                barcode.hasECI();
+
+
+        const auto bytesECI =
+                barcode.bytesECI();
+
+
+        const int eci =
+                ExtractFirstECI(
+                        bytesECI
                 );
-            }
 
-            return result;
-        }
 
-        return nullptr;
+        const std::string charset =
+                eci >= 0
+                ? ECIName(eci)
+                : "";
 
-    } catch (const std::exception& e) {
 
-        if (!released) {
+        const std::string text =
+                barcode.text();
 
-            env->ReleaseByteArrayElements(
-                    rgbaArray,
-                    raw,
-                    JNI_ABORT
-            );
-        }
 
-        ThrowJavaException(
+        return CreateDecodeResult(
                 env,
-                "java/lang/RuntimeException",
+                bytes,
+                hasECI,
+                eci,
+                charset,
+                text
+        );
+
+    }
+    catch (const std::exception& e) {
+
+        env->ReleaseByteArrayElements(
+                rgbaArray,
+                data,
+                JNI_ABORT
+        );
+
+
+        ThrowIllegalState(
+                env,
                 e.what()
         );
 
         return nullptr;
+    }
+    catch (...) {
 
-    } catch (...) {
+        env->ReleaseByteArrayElements(
+                rgbaArray,
+                data,
+                JNI_ABORT
+        );
 
-        if (!released) {
 
-            env->ReleaseByteArrayElements(
-                    rgbaArray,
-                    raw,
-                    JNI_ABORT
-            );
-        }
-
-        ThrowJavaException(
+        ThrowIllegalState(
                 env,
-                "java/lang/RuntimeException",
-                "Unknown ZXing-C++ exception"
+                "Unknown native exception"
         );
 
         return nullptr;
@@ -504,15 +694,30 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeDecodeBytes(
 }
 
 
-/**
- * ============================================================
- * ZXing-C++ Writer
- *
- * byte[] -> QR Code -> grayscale pixels
- *
- * 这是 QrFT 推荐的编码 API。
- * ============================================================
- */
+// ============================================================
+// Encode byte[]
+//
+// 参数：
+//     data
+//     width
+//     height
+//     quietZone
+//     ecLevel
+//     eci
+//
+// ecLevel:
+//     1 = L
+//     2 = M
+//     3 = Q
+//     4 = H
+//
+// eci:
+//     3   = ISO-8859-1
+//     26  = UTF-8
+//     899 = 8-bit binary
+// ============================================================
+
+extern "C"
 JNIEXPORT jbyteArray JNICALL
 Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
         JNIEnv* env,
@@ -521,219 +726,214 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
         jint width,
         jint height,
         jint quietZone,
-        jint ecLevel)
+        jint ecLevel,
+        jint eci)
 {
     if (dataArray == nullptr) {
 
-        ThrowJavaException(
+        ThrowIllegalArgument(
                 env,
-                "java/lang/NullPointerException",
-                "data"
+                "data == null"
         );
 
         return nullptr;
     }
 
-    if (width <= 0 ||
-        height <= 0) {
 
-        ThrowJavaException(
+    if (width <= 0 || height <= 0) {
+
+        ThrowIllegalArgument(
                 env,
-                "java/lang/IllegalArgumentException",
-                "Invalid image dimensions"
+                "width/height must be > 0"
         );
 
         return nullptr;
     }
+
 
     if (quietZone < 0) {
 
-        ThrowJavaException(
+        ThrowIllegalArgument(
                 env,
-                "java/lang/IllegalArgumentException",
                 "quietZone must be >= 0"
         );
 
         return nullptr;
     }
 
+
+    if (ecLevel < 1 || ecLevel > 4) {
+
+        ThrowIllegalArgument(
+                env,
+                "ecLevel must be 1(L), 2(M), 3(Q), or 4(H)"
+        );
+
+        return nullptr;
+    }
+
+
+    if (eci < 0 || eci > 999999) {
+
+        ThrowIllegalArgument(
+                env,
+                "ECI must be between 0 and 999999"
+        );
+
+        return nullptr;
+    }
+
+
     const jsize dataLength =
             env->GetArrayLength(
                     dataArray
             );
 
+
     if (dataLength <= 0) {
 
-        ThrowJavaException(
+        ThrowIllegalArgument(
                 env,
-                "java/lang/IllegalArgumentException",
                 "data is empty"
         );
 
         return nullptr;
     }
 
-    jbyte* raw =
+
+    jbyte* data =
             env->GetByteArrayElements(
                     dataArray,
                     nullptr
             );
 
-    if (raw == nullptr) {
+
+    if (data == nullptr) {
         return nullptr;
     }
 
-    bool released = false;
 
     try {
 
         /*
-         * ========================================================
-         * CreatorOptions
-         * ========================================================
+         * Zint / ZXing-C++ 新 Writer API：
          *
-         * 这里使用 ZXing-C++ 3.1.1 新 Writer API。
-         *
-         * 最重要的是：
-         *
-         * CreateBarcodeFromBytes()
-         *
-         * 它直接接收：
-         *
-         *     void* + size
-         *
-         * 所以：
-         *
-         * Java byte[]
-         *     ↓
-         * JNI
-         *     ↓
-         * CreateBarcodeFromBytes()
-         *
-         * 中间没有 String。
+         * CreatorOptions options(
+         *     BarcodeFormat::QRCode,
+         *     "ecLevel=M,eci=3"
+         * );
          */
-        ZXing::CreatorOptions options(
-                ZXing::BarcodeFormat::QRCode
-        );
+        std::string options;
+
 
         /*
-         * ecLevel:
+         * QRCode 的 ECC。
          *
-         * -1 = 使用 ZXing-C++ / Zint 默认值
+         * 使用标准的 L/M/Q/H。
          *
-         * 1 = L
-         * 2 = M
-         * 3 = Q
-         * 4 = H
-         *
-         * 也支持：
-         *
-         * 5 / 6 / 7 / 8
-         *
-         * 但 QrFT 第一阶段建议只使用：
-         *
-         * -1 / 1 / 2 / 3 / 4
-         *
-         * 因为新 Writer API 的 ecLevel 使用
-         * L/M/Q/H 或百分比字符串。
+         * ZXing-C++ 的 CreatorOptions 官方示例
+         * 也支持 ecLevel("M") / ecLevel("Q") / ecLevel("H")。
          */
-        if (ecLevel == 1) {
+        switch (ecLevel) {
 
-            options.options(
-                    "ecLevel=L"
-            );
+            case 1:
+                options += "ecLevel=L";
+                break;
 
-        } else if (ecLevel == 2) {
+            case 2:
+                options += "ecLevel=M";
+                break;
 
-            options.options(
-                    "ecLevel=M"
-            );
+            case 3:
+                options += "ecLevel=Q";
+                break;
 
-        } else if (ecLevel == 3) {
+            case 4:
+                options += "ecLevel=H";
+                break;
+        }
 
-            options.options(
-                    "ecLevel=Q"
-            );
 
-        } else if (ecLevel == 4) {
+        /*
+         * ECI。
+         *
+         * 例如：
+         *
+         * eci=3
+         * eci=26
+         * eci=899
+         */
+        options += ",eci=";
+        options += std::to_string(eci);
 
-            options.options(
-                    "ecLevel=H"
-            );
 
-        } else if (ecLevel != -1) {
+        ZXing::CreatorOptions creatorOptions(
+                ZXing::BarcodeFormat::QRCode,
+                options
+        );
 
-            ThrowJavaException(
+
+        /*
+         * 关键：
+         *
+         * CreateBarcodeFromBytes()
+         *
+         * 不经过 Java String。
+         */
+        const ZXing::Barcode barcode =
+                ZXing::CreateBarcodeFromBytes(
+                        reinterpret_cast<const uint8_t*>(data),
+                        static_cast<int>(dataLength),
+                        creatorOptions
+                );
+
+
+        /*
+         * Java byte[] 不再使用。
+         */
+        env->ReleaseByteArrayElements(
+                dataArray,
+                data,
+                JNI_ABORT
+        );
+
+        data = nullptr;
+
+
+        if (!barcode.isValid()) {
+
+            ThrowIllegalState(
                     env,
-                    "java/lang/IllegalArgumentException",
-                    "ecLevel must be -1, 1, 2, 3 or 4"
+                    barcode.error().msg()
             );
-
-            env->ReleaseByteArrayElements(
-                    dataArray,
-                    raw,
-                    JNI_ABORT
-            );
-
-            released = true;
 
             return nullptr;
         }
 
-        /*
-         * 直接使用原始 byte[]。
-         *
-         * 不进行：
-         *
-         *     UTF-8
-         *     ISO-8859-1
-         *     String
-         *     Base64
-         *
-         * 转换。
-         */
-        const auto barcode =
-                ZXing::CreateBarcodeFromBytes(
-                        raw,
-                        static_cast<int>(
-                                dataLength
-                        ),
-                        options
-                );
 
         /*
-         * 现在已经完成二维码编码。
-         *
-         * 可以释放 Java byte[]。
-         */
-        env->ReleaseByteArrayElements(
-                dataArray,
-                raw,
-                JNI_ABORT
-        );
-
-        released = true;
-
-        /*
-         * 获取二维码原始 symbol。
-         *
-         * 这里不是完整的 600x600 图片，
-         * 而是二维码 module 矩阵。
-         *
-         * 例如可能是：
-         *
-         *     177 x 177
-         *     185 x 185
-         *     ...
+         * 取得二维码 module matrix。
          */
         const ZXing::ImageView symbol =
                 barcode.symbol();
 
+
+        if (symbol.empty()) {
+
+            ThrowIllegalState(
+                    env,
+                    "ZXing-C++ returned empty QR symbol"
+            );
+
+            return nullptr;
+        }
+
+
         /*
-         * 根据指定的 width / height
-         * 渲染成固定尺寸灰度图片。
+         * 渲染为固定 width x height 的
+         * 8-bit grayscale byte[]。
          */
-        const std::vector<uint8_t> pixels =
+        const std::vector<uint8_t> image =
                 RenderQRCode(
                         symbol,
                         width,
@@ -741,64 +941,49 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
                         quietZone
                 );
 
-        jbyteArray result =
-                env->NewByteArray(
-                        static_cast<jsize>(
-                                pixels.size()
-                        )
-                );
 
-        if (result == nullptr) {
-            return nullptr;
-        }
-
-        env->SetByteArrayRegion(
-                result,
-                0,
-                static_cast<jsize>(
-                        pixels.size()
-                ),
-                reinterpret_cast<const jbyte*>(
-                        pixels.data()
-                )
+        return VectorToByteArray(
+                env,
+                image
         );
 
-        return result;
+    }
+    catch (const std::exception& e) {
 
-    } catch (const std::exception& e) {
-
-        if (!released) {
+        if (data != nullptr) {
 
             env->ReleaseByteArrayElements(
                     dataArray,
-                    raw,
+                    data,
                     JNI_ABORT
             );
+
         }
 
-        ThrowJavaException(
+
+        ThrowIllegalState(
                 env,
-                "java/lang/RuntimeException",
                 e.what()
         );
 
         return nullptr;
+    }
+    catch (...) {
 
-    } catch (...) {
-
-        if (!released) {
+        if (data != nullptr) {
 
             env->ReleaseByteArrayElements(
                     dataArray,
-                    raw,
+                    data,
                     JNI_ABORT
             );
+
         }
 
-        ThrowJavaException(
+
+        ThrowIllegalState(
                 env,
-                "java/lang/RuntimeException",
-                "Unknown ZXing-C++ writer exception"
+                "Unknown native exception"
         );
 
         return nullptr;
@@ -806,346 +991,17 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeEncodeBytes(
 }
 
 
-/**
- * ============================================================
- * 完整二维码解码
- * ============================================================
- */
-JNIEXPORT jobject JNICALL
-Java_com_hrz_zxingcpp_ZXingCpp_nativeDecode(
-        JNIEnv* env,
-        jclass,
-        jbyteArray rgbaArray,
-        jint width,
-        jint height,
-        jint rowStride,
-        jboolean tryRotate,
-        jboolean tryInvert)
-{
-    if (rgbaArray == nullptr) {
+// ============================================================
+// ZXing-C++ version
+// ============================================================
 
-        ThrowJavaException(
-                env,
-                "java/lang/NullPointerException",
-                "rgba"
-        );
-
-        return nullptr;
-    }
-
-    if (width <= 0 ||
-        height <= 0 ||
-        rowStride < width * 4) {
-
-        ThrowJavaException(
-                env,
-                "java/lang/IllegalArgumentException",
-                "Invalid image dimensions or rowStride"
-        );
-
-        return nullptr;
-    }
-
-    const jsize length =
-            env->GetArrayLength(
-                    rgbaArray
-            );
-
-    const jlong required =
-            static_cast<jlong>(
-                    rowStride
-            ) * height;
-
-    if (length < required) {
-
-        ThrowJavaException(
-                env,
-                "java/lang/IllegalArgumentException",
-                "RGBA array is smaller than rowStride * height"
-        );
-
-        return nullptr;
-    }
-
-    jbyte* raw =
-            env->GetByteArrayElements(
-                    rgbaArray,
-                    nullptr
-            );
-
-    if (raw == nullptr) {
-        return nullptr;
-    }
-
-    bool released = false;
-
-    try {
-
-        const auto* pixels =
-                reinterpret_cast<const uint8_t*>(
-                        raw
-                );
-
-        ZXing::ImageView image(
-                pixels,
-                width,
-                height,
-                ZXing::ImageFormat::RGBA,
-                rowStride
-        );
-
-        auto options =
-                ZXing::ReaderOptions()
-                        .formats(
-                                ZXing::BarcodeFormat::QRCode
-                        )
-                        .tryRotate(
-                                tryRotate == JNI_TRUE
-                        )
-                        .tryInvert(
-                                tryInvert == JNI_TRUE
-                        )
-                        .tryDownscale(true)
-                        .maxNumberOfSymbols(1)
-                        .returnErrors(false);
-
-        auto barcodes =
-                ZXing::ReadBarcodes(
-                        image,
-                        options
-                );
-
-        env->ReleaseByteArrayElements(
-                rgbaArray,
-                raw,
-                JNI_ABORT
-        );
-
-        released = true;
-
-        for (const auto& barcode : barcodes) {
-
-            if (!barcode.isValid()) {
-                continue;
-            }
-
-            /*
-             * ------------------------------------------------------
-             * 1. raw bytes
-             * ------------------------------------------------------
-             */
-            const auto& bytes =
-                    barcode.bytes();
-
-            /*
-             * ------------------------------------------------------
-             * 2. ECI
-             * ------------------------------------------------------
-             */
-            const bool hasECI =
-                    barcode.hasECI();
-
-            int eci = -1;
-
-            std::string charset;
-
-            if (hasECI) {
-
-                const auto eciBytes =
-                        barcode.bytesECI();
-
-                eci =
-                        ExtractFirstECI(
-                                eciBytes
-                        );
-
-                if (eci >= 0) {
-
-                    charset =
-                            CharacterSetName(
-                                    static_cast<ZXing::ECI>(
-                                            eci
-                                    )
-                            );
-                }
-            }
-
-            /*
-             * ------------------------------------------------------
-             * 3. UTF-8 text
-             * ------------------------------------------------------
-             */
-            const std::string text =
-                    barcode.text();
-
-            /*
-             * ------------------------------------------------------
-             * 4. Java DecodeResult
-             * ------------------------------------------------------
-             */
-            jclass resultClass =
-                    env->FindClass(
-                            "com/hrz/zxingcpp/ZXingCpp$DecodeResult"
-                    );
-
-            if (resultClass == nullptr) {
-                return nullptr;
-            }
-
-            jmethodID constructor =
-                    env->GetMethodID(
-                            resultClass,
-                            "<init>",
-                            "([BZILjava/lang/String;Ljava/lang/String;)V"
-                    );
-
-            if (constructor == nullptr) {
-                return nullptr;
-            }
-
-            /*
-             * bytes
-             */
-            jbyteArray javaBytes =
-                    env->NewByteArray(
-                            static_cast<jsize>(
-                                    bytes.size()
-                            )
-                    );
-
-            if (javaBytes == nullptr) {
-                return nullptr;
-            }
-
-            if (!bytes.empty()) {
-
-                env->SetByteArrayRegion(
-                        javaBytes,
-                        0,
-                        static_cast<jsize>(
-                                bytes.size()
-                        ),
-                        reinterpret_cast<const jbyte*>(
-                                bytes.data()
-                        )
-                );
-            }
-
-            /*
-             * charset
-             */
-            jstring javaCharset = nullptr;
-
-            if (!charset.empty()) {
-
-                javaCharset =
-                        env->NewStringUTF(
-                                charset.c_str()
-                        );
-
-                if (javaCharset == nullptr) {
-                    return nullptr;
-                }
-            }
-
-            /*
-             * text
-             */
-            jstring javaText = nullptr;
-
-            if (!text.empty()) {
-
-                javaText =
-                        env->NewStringUTF(
-                                text.c_str()
-                        );
-
-                if (javaText == nullptr) {
-                    return nullptr;
-                }
-            }
-
-            /*
-             * DecodeResult
-             */
-            jobject result =
-                    env->NewObject(
-                            resultClass,
-                            constructor,
-                            javaBytes,
-                            hasECI
-                                    ? JNI_TRUE
-                                    : JNI_FALSE,
-                            static_cast<jint>(
-                                    eci
-                            ),
-                            javaCharset,
-                            javaText
-                    );
-
-            return result;
-        }
-
-        return nullptr;
-
-    } catch (const std::exception& e) {
-
-        if (!released) {
-
-            env->ReleaseByteArrayElements(
-                    rgbaArray,
-                    raw,
-                    JNI_ABORT
-            );
-        }
-
-        ThrowJavaException(
-                env,
-                "java/lang/RuntimeException",
-                e.what()
-        );
-
-        return nullptr;
-
-    } catch (...) {
-
-        if (!released) {
-
-            env->ReleaseByteArrayElements(
-                    rgbaArray,
-                    raw,
-                    JNI_ABORT
-            );
-        }
-
-        ThrowJavaException(
-                env,
-                "java/lang/RuntimeException",
-                "Unknown ZXing-C++ exception"
-        );
-
-        return nullptr;
-    }
-}
-
-
-/**
- * ============================================================
- * ZXing-C++ version
- * ============================================================
- */
+extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_hrz_zxingcpp_ZXingCpp_nativeVersion(
         JNIEnv* env,
         jclass)
 {
-    const std::string version =
-            ZXing::Version();
-
     return env->NewStringUTF(
-            version.c_str()
+            ZXing::Version().c_str()
     );
 }
-
-
-} // extern "C"
