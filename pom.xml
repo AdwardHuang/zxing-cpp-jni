@@ -1,35 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.hrz</groupId>
     <artifactId>zxing-cpp-jni</artifactId>
     <version>0.1.0-SNAPSHOT</version>
+
     <name>zxing-cpp-jni</name>
     <description>Java JNI wrapper for ZXing-C++</description>
+
     <packaging>jar</packaging>
 
     <properties>
         <maven.compiler.release>11</maven.compiler.release>
+
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
+
+        <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+        <maven.jar.plugin.version>3.4.2</maven.jar.plugin.version>
+
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version>
     </properties>
 
     <build>
+
         <plugins>
+
+            <!-- ===================================================== -->
+            <!-- Java Compiler -->
+            <!-- ===================================================== -->
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
+                <version>${maven.compiler.plugin.version}</version>
+
                 <configuration>
-                    <release>11</release>
+                    <release>${maven.compiler.release}</release>
+                    <encoding>${project.build.sourceEncoding}</encoding>
                 </configuration>
             </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- Main JAR -->
+            <!-- ===================================================== -->
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.4.2</version>
+                <version>${maven.jar.plugin.version}</version>
             </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- Sources JAR -->
+            <!--
+                 生成：
+                 zxing-cpp-jni-0.1.0-SNAPSHOT-sources.jar
+            -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>${maven-source-plugin.version}</version>
+
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- Javadoc JAR -->
+            <!--
+                 生成：
+                 zxing-cpp-jni-0.1.0-SNAPSHOT-javadoc.jar
+            -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${maven-javadoc-plugin.version}</version>
+
+                <configuration>
+                    <encoding>UTF-8</encoding>
+                    <docencoding>UTF-8</docencoding>
+                    <charset>UTF-8</charset>
+
+                    <source>11</source>
+
+                    <failOnError>false</failOnError>
+                    <quiet>true</quiet>
+                </configuration>
+
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
         </plugins>
+
     </build>
+
 </project>
