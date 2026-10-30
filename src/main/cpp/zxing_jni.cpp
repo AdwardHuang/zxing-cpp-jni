@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <limits>
 
 #include "ZXingCpp.h"
 
@@ -1623,6 +1624,392 @@ Java_com_hrz_zxingcpp_QrCode_nativeQrCodeRender(
         return nullptr;
     }
     catch (...) {
+        ThrowIllegalState(env, "Unknown native exception");
+        return nullptr;
+    }
+}
+
+
+// ============================================================
+// Multi-format BarcodeReader JNI API
+//
+// Java:
+//   com.hrz.zxingcpp.BarcodeReader.nativeRead()
+//
+// ZXing-C++:
+//   v3.1.1
+//
+// 注意：本段为追加代码，不替换原有 JNI 实现。
+// ============================================================
+
+namespace
+{
+
+jstring NewJavaString(JNIEnv* env, const std::string& value)
+{
+    return env->NewStringUTF(value.c_str());
+}
+
+jobject CreateImagePoint(JNIEnv* env, jclass pointClass, jmethodID constructor, int x, int y)
+{
+    return env->NewObject(pointClass, constructor, static_cast<jint>(x), static_cast<jint>(y));
+}
+
+jobject CreateBarcodeHit(
+        JNIEnv* env,
+        jclass hitClass,
+        jmethodID hitConstructor,
+        jclass pointClass,
+        jmethodID pointConstructor,
+        const ZXing::Barcode& barcode)
+{
+    const auto& bytes = barcode.bytes();
+
+    if (bytes.size() > static_cast<size_t>(std::numeric_limits<jsize>::max())) {
+        ThrowIllegalState(env, "Barcode byte array is too large");
+        return nullptr;
+    }
+
+    jbyteArray rawBytes = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (rawBytes == nullptr) {
+        return nullptr;
+    }
+
+    if (!bytes.empty()) {
+        env->SetByteArrayRegion(rawBytes, 0, static_cast<jsize>(bytes.size()), reinterpret_cast<const jbyte*>(bytes.data()));
+        if (env->ExceptionCheck()) {
+            env->DeleteLocalRef(rawBytes);
+            return nullptr;
+        }
+    }
+
+    jstring text = NewJavaString(env, barcode.text());
+    jstring format = NewJavaString(env, ZXing::ToString(barcode.format()));
+    jstring symbology = NewJavaString(env, ZXing::ToString(barcode.symbology()));
+
+    if (text == nullptr || format == nullptr || symbology == nullptr) {
+        env->DeleteLocalRef(rawBytes);
+        if (text != nullptr) {
+            env->DeleteLocalRef(text);
+        }
+        if (format != nullptr) {
+            env->DeleteLocalRef(format);
+        }
+        if (symbology != nullptr) {
+            env->DeleteLocalRef(symbology);
+        }
+        return nullptr;
+    }
+
+    jobjectArray position = env->NewObjectArray(4, pointClass, nullptr);
+    if (position == nullptr) {
+        env->DeleteLocalRef(rawBytes);
+        env->DeleteLocalRef(text);
+        env->DeleteLocalRef(format);
+        env->DeleteLocalRef(symbology);
+        return nullptr;
+    }
+
+    const auto& points = barcode.position();
+
+    for (jsize i = 0; i < 4; ++i) {
+        jobject point = CreateImagePoint(
+                env,
+                pointClass,
+                pointConstructor,
+                points[static_cast<size_t>(i)].x,
+                points[static_cast<size_t>(i)].y
+        );
+
+        if (point == nullptr) {
+            env->DeleteLocalRef(rawBytes);
+            env->DeleteLocalRef(text);
+            env->DeleteLocalRef(format);
+            env->DeleteLocalRef(symbology);
+            env->DeleteLocalRef(position);
+            return nullptr;
+        }
+
+        env->SetObjectArrayElement(position, i, point);
+        env->DeleteLocalRef(point);
+
+        if (env->ExceptionCheck()) {
+            env->DeleteLocalRef(rawBytes);
+            env->DeleteLocalRef(text);
+            env->DeleteLocalRef(format);
+            env->DeleteLocalRef(symbology);
+            env->DeleteLocalRef(position);
+            return nullptr;
+        }
+    }
+
+    jstring sequenceId = NewJavaString(env, barcode.sequenceId());
+    jstring symbologyIdentifier = NewJavaString(env, barcode.symbologyIdentifier());
+
+    const std::string errorMessage = barcode.error().msg();
+    jstring error = NewJavaString(env, errorMessage);
+
+    if (sequenceId == nullptr || symbologyIdentifier == nullptr || error == nullptr) {
+        env->DeleteLocalRef(rawBytes);
+        env->DeleteLocalRef(text);
+        env->DeleteLocalRef(format);
+        env->DeleteLocalRef(symbology);
+        env->DeleteLocalRef(position);
+
+        if (sequenceId != nullptr) {
+            env->DeleteLocalRef(sequenceId);
+        }
+        if (symbologyIdentifier != nullptr) {
+            env->DeleteLocalRef(symbologyIdentifier);
+        }
+        if (error != nullptr) {
+            env->DeleteLocalRef(error);
+        }
+
+        return nullptr;
+    }
+
+    jobject result = env->NewObject(
+            hitClass,
+            hitConstructor,
+            rawBytes,
+            text,
+            format,
+            symbology,
+            position,
+            static_cast<jint>(barcode.orientation()),
+            barcode.isMirrored() ? JNI_TRUE : JNI_FALSE,
+            barcode.isInverted() ? JNI_TRUE : JNI_FALSE,
+            barcode.hasECI() ? JNI_TRUE : JNI_FALSE,
+            static_cast<jint>(barcode.sequenceSize()),
+            static_cast<jint>(barcode.sequenceIndex()),
+            sequenceId,
+            symbologyIdentifier,
+            error
+    );
+
+    env->DeleteLocalRef(rawBytes);
+    env->DeleteLocalRef(text);
+    env->DeleteLocalRef(format);
+    env->DeleteLocalRef(symbology);
+    env->DeleteLocalRef(position);
+    env->DeleteLocalRef(sequenceId);
+    env->DeleteLocalRef(symbologyIdentifier);
+    env->DeleteLocalRef(error);
+
+    return result;
+}
+
+} // namespace
+
+
+extern "C"
+JNIEXPORT jobjectArray JNICALL
+Java_com_hrz_zxingcpp_BarcodeReader_nativeRead(
+        JNIEnv* env,
+        jclass,
+        jbyteArray rgbaArray,
+        jint width,
+        jint height,
+        jint rowStride,
+        jobjectArray formatsArray,
+        jboolean tryHarder,
+        jboolean tryRotate,
+        jboolean tryInvert,
+        jboolean tryDownscale,
+        jint maxSymbols,
+        jboolean returnErrors)
+{
+    if (rgbaArray == nullptr) {
+        ThrowIllegalArgument(env, "rgba == null");
+        return nullptr;
+    }
+
+    if (formatsArray == nullptr) {
+        ThrowIllegalArgument(env, "formats == null");
+        return nullptr;
+    }
+
+    if (width <= 0 || height <= 0) {
+        ThrowIllegalArgument(env, "width/height must be > 0");
+        return nullptr;
+    }
+
+    if (rowStride < width * 4) {
+        ThrowIllegalArgument(env, "rowStride must be >= width * 4");
+        return nullptr;
+    }
+
+    if (maxSymbols < 1 || maxSymbols > 255) {
+        ThrowIllegalArgument(env, "maxSymbols must be between 1 and 255");
+        return nullptr;
+    }
+
+    const jsize rgbaLength = env->GetArrayLength(rgbaArray);
+    const int64_t requiredSize =
+            static_cast<int64_t>(rowStride) * static_cast<int64_t>(height - 1) +
+            static_cast<int64_t>(width) * 4;
+
+    if (requiredSize > rgbaLength) {
+        ThrowIllegalArgument(env, "RGBA buffer is smaller than image");
+        return nullptr;
+    }
+
+    const jsize formatCount = env->GetArrayLength(formatsArray);
+    if (formatCount <= 0) {
+        ThrowIllegalArgument(env, "formats must not be empty");
+        return nullptr;
+    }
+
+    std::string formatNames;
+
+    for (jsize i = 0; i < formatCount; ++i) {
+        auto formatString = static_cast<jstring>(env->GetObjectArrayElement(formatsArray, i));
+
+        if (formatString == nullptr) {
+            ThrowIllegalArgument(env, "format name must not be null");
+            return nullptr;
+        }
+
+        const char* chars = env->GetStringUTFChars(formatString, nullptr);
+        if (chars == nullptr) {
+            env->DeleteLocalRef(formatString);
+            return nullptr;
+        }
+
+        if (!formatNames.empty()) {
+            formatNames += '|';
+        }
+
+        formatNames += chars;
+
+        env->ReleaseStringUTFChars(formatString, chars);
+        env->DeleteLocalRef(formatString);
+
+        if (env->ExceptionCheck()) {
+            return nullptr;
+        }
+    }
+
+    jbyte* rgbaData = env->GetByteArrayElements(rgbaArray, nullptr);
+    if (rgbaData == nullptr) {
+        return nullptr;
+    }
+
+    try {
+        const ZXing::BarcodeFormats barcodeFormats = ZXing::BarcodeFormatsFromString(formatNames);
+
+        ZXing::ImageView image(
+                reinterpret_cast<const uint8_t*>(rgbaData),
+                rgbaLength,
+                width,
+                height,
+                ZXing::ImageFormat::RGBA,
+                rowStride,
+                4
+        );
+
+        auto options = ZXing::ReaderOptions()
+                .formats(barcodeFormats)
+                .tryHarder(tryHarder == JNI_TRUE)
+                .tryRotate(tryRotate == JNI_TRUE)
+                .tryInvert(tryInvert == JNI_TRUE)
+                .tryDownscale(tryDownscale == JNI_TRUE)
+                .maxNumberOfSymbols(static_cast<uint8_t>(maxSymbols))
+                .returnErrors(returnErrors == JNI_TRUE);
+
+        const ZXing::Barcodes barcodes = ZXing::ReadBarcodes(image, options);
+
+        env->ReleaseByteArrayElements(rgbaArray, rgbaData, JNI_ABORT);
+        rgbaData = nullptr;
+
+        jclass hitClass = env->FindClass("com/hrz/zxingcpp/BarcodeHit");
+        if (hitClass == nullptr) {
+            return nullptr;
+        }
+
+        jmethodID hitConstructor = env->GetMethodID(
+                hitClass,
+                "<init>",
+                "([BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;[Lcom/hrz/zxingcpp/ImagePoint;IZZZIILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V"
+        );
+
+        if (hitConstructor == nullptr) {
+            env->DeleteLocalRef(hitClass);
+            return nullptr;
+        }
+
+        jclass pointClass = env->FindClass("com/hrz/zxingcpp/ImagePoint");
+        if (pointClass == nullptr) {
+            env->DeleteLocalRef(hitClass);
+            return nullptr;
+        }
+
+        jmethodID pointConstructor = env->GetMethodID(pointClass, "<init>", "(II)V");
+        if (pointConstructor == nullptr) {
+            env->DeleteLocalRef(hitClass);
+            env->DeleteLocalRef(pointClass);
+            return nullptr;
+        }
+
+        jobjectArray result = env->NewObjectArray(
+                static_cast<jsize>(barcodes.size()),
+                hitClass,
+                nullptr
+        );
+
+        if (result == nullptr) {
+            env->DeleteLocalRef(hitClass);
+            env->DeleteLocalRef(pointClass);
+            return nullptr;
+        }
+
+        for (jsize i = 0; i < static_cast<jsize>(barcodes.size()); ++i) {
+            jobject hit = CreateBarcodeHit(
+                    env,
+                    hitClass,
+                    hitConstructor,
+                    pointClass,
+                    pointConstructor,
+                    barcodes[static_cast<size_t>(i)]
+            );
+
+            if (hit == nullptr) {
+                env->DeleteLocalRef(result);
+                env->DeleteLocalRef(hitClass);
+                env->DeleteLocalRef(pointClass);
+                return nullptr;
+            }
+
+            env->SetObjectArrayElement(result, i, hit);
+            env->DeleteLocalRef(hit);
+
+            if (env->ExceptionCheck()) {
+                env->DeleteLocalRef(result);
+                env->DeleteLocalRef(hitClass);
+                env->DeleteLocalRef(pointClass);
+                return nullptr;
+            }
+        }
+
+        env->DeleteLocalRef(hitClass);
+        env->DeleteLocalRef(pointClass);
+
+        return result;
+    }
+    catch (const std::exception& e) {
+        if (rgbaData != nullptr) {
+            env->ReleaseByteArrayElements(rgbaArray, rgbaData, JNI_ABORT);
+        }
+
+        ThrowIllegalState(env, e.what());
+        return nullptr;
+    }
+    catch (...) {
+        if (rgbaData != nullptr) {
+            env->ReleaseByteArrayElements(rgbaArray, rgbaData, JNI_ABORT);
+        }
+
         ThrowIllegalState(env, "Unknown native exception");
         return nullptr;
     }
