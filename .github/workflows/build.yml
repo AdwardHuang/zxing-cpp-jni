@@ -1,10 +1,10 @@
+
 name: Build ZXing-C++ JNI
 
 on:
   push:
     branches:
       - main
-
     tags:
       - "v*"
 
@@ -12,10 +12,8 @@ on:
 
   workflow_dispatch:
 
-
 permissions:
   contents: write
-
 
 jobs:
 
@@ -24,51 +22,18 @@ jobs:
   # ============================================================
 
   native-windows:
-
     name: Native Windows x86_64
-
     runs-on: windows-2022
 
     steps:
-
-      # --------------------------------------------------------
-      # Checkout
-      # --------------------------------------------------------
-
       - name: Checkout
         uses: actions/checkout@v5
-
-
-      # --------------------------------------------------------
-      # JDK 11
-      # --------------------------------------------------------
 
       - name: Setup JDK 11
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "11"
-
-
-      # --------------------------------------------------------
-      # Show environment
-      # --------------------------------------------------------
-
-      - name: Show environment
-        shell: pwsh
-        run: |
-          Write-Host "===== Environment ====="
-
-          Write-Host "JAVA_HOME:"
-          Write-Host $env:JAVA_HOME
-
-          java -version
-          cmake --version
-
-
-      # --------------------------------------------------------
-      # Configure
-      # --------------------------------------------------------
 
       - name: Configure
         shell: pwsh
@@ -79,55 +44,19 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$PWD/build/install"
 
-
-      # --------------------------------------------------------
-      # Build
-      # --------------------------------------------------------
-
       - name: Build
         shell: pwsh
         run: |
-          cmake `
-            --build build/native `
-            --config Release `
-            --parallel
-
-
-      # --------------------------------------------------------
-      # Install
-      # --------------------------------------------------------
+          cmake --build build/native --config Release --parallel
 
       - name: Install
         shell: pwsh
         run: |
-          cmake `
-            --install build/native `
-            --config Release
-
-
-      # --------------------------------------------------------
-      # Check output
-      # --------------------------------------------------------
-
-      - name: List install directory
-        shell: pwsh
-        run: |
-          Write-Host "===== build/install ====="
-
-          Get-ChildItem `
-            -Path build/install `
-            -Recurse `
-            -File
-
-
-      # --------------------------------------------------------
-      # Prepare artifact
-      # --------------------------------------------------------
+          cmake --install build/native --config Release
 
       - name: Prepare Windows native library
         shell: pwsh
         run: |
-
           New-Item `
             -ItemType Directory `
             -Force `
@@ -138,166 +67,92 @@ jobs:
             "build/install/zxing_jni.dll" `
             "native/windows-x86_64/zxing_jni.dll"
 
-
-      # --------------------------------------------------------
-      # Upload native artifact
-      # --------------------------------------------------------
-
       - name: Upload Windows native artifact
         uses: actions/upload-artifact@v4
-
         with:
           name: native-windows-x86_64
-
           path: native/windows-x86_64
-
           if-no-files-found: error
-
 
 
   # ============================================================
   # Linux Native
   #
-  # IMPORTANT:
+  # Build baseline:
+  #   Ubuntu 20.04
+  #   glibc 2.31
+  #   GCC 9
   #
-  # GitHub Runner:
-  #     ubuntu-22.04
+  # Target machine:
+  #   GLIBCXX_3.4.28
   #
-  # Actual build environment:
-  #     Ubuntu 20.04
-  #
-  # Ubuntu 20.04:
-  #     glibc 2.31
-  #
-  # Therefore the generated libzxing_jni.so
-  # uses glibc 2.31 as the build baseline.
+  # Avoid GCC 11 because it may introduce GLIBCXX_3.4.29.
   # ============================================================
 
   native-linux:
-
-    name: Native Linux x86_64 (glibc 2.31)
-
+    name: Native Linux x86_64 (glibc 2.31 / GCC 9)
     runs-on: ubuntu-22.04
 
     steps:
-
-      # --------------------------------------------------------
-      # Checkout
-      # --------------------------------------------------------
-
       - name: Checkout
         uses: actions/checkout@v5
 
-
-      # --------------------------------------------------------
-      # Build inside Ubuntu 20.04
-      # --------------------------------------------------------
-
       - name: Build Linux native library on Ubuntu 20.04
         shell: bash
-
         run: |
-
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/workspace" \
             -w /workspace \
             ubuntu:20.04 \
             bash -euxo pipefail -c '
 
-              echo "=================================================="
-              echo "Ubuntu version"
-              echo "=================================================="
-
-              cat /etc/os-release
-
-
-              echo "=================================================="
-              echo "Install build dependencies"
-              echo "=================================================="
-
               export DEBIAN_FRONTEND=noninteractive
+
+              echo "===== Install dependencies ====="
 
               apt-get update
 
               apt-get install -y \
                 ca-certificates \
-                curl \
                 git \
                 build-essential \
-                gcc-11 \
-                g++-11 \
                 binutils \
                 file \
                 openjdk-11-jdk \
                 python3 \
                 python3-pip \
-                unzip
+                ninja-build
 
-
-              echo "=================================================="
-              echo "Compiler"
-              echo "=================================================="
-
-              gcc-11 --version
-
-              g++-11 --version
-
-
-              echo "=================================================="
-              echo "Java"
-              echo "=================================================="
-
-              java -version
-
-
-              echo "=================================================="
-              echo "JAVA_HOME"
-              echo "=================================================="
+              echo "===== Configure environment ====="
 
               export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-
               export PATH="$JAVA_HOME/bin:$PATH"
 
-              echo "JAVA_HOME=$JAVA_HOME"
+              export CC=gcc
+              export CXX=g++
 
               test -f "$JAVA_HOME/include/jni.h"
 
+              gcc --version
+              g++ --version
+              java -version
 
-              echo "=================================================="
-              echo "Install CMake"
-              echo "=================================================="
+              echo "===== Install CMake ====="
 
               python3 -m pip install \
                 --no-cache-dir \
                 "cmake==3.31.6"
 
-
               cmake --version
 
-
-              echo "=================================================="
-              echo "Compiler environment"
-              echo "=================================================="
-
-              export CC=gcc-11
-              export CXX=g++-11
-
-              echo "CC=$CC"
-              echo "CXX=$CXX"
-
-
-              echo "=================================================="
-              echo "Clean container build directory"
-              echo "=================================================="
+              echo "===== Clean build directory ====="
 
               rm -rf build/linux-container
+              rm -rf build/install-linux
 
               mkdir -p build/linux-container
 
-
-              echo "=================================================="
-              echo "Configure"
-              echo "=================================================="
+              echo "===== Configure CMake ====="
 
               cmake \
                 -S src/main/cpp \
@@ -305,66 +160,43 @@ jobs:
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/workspace/build/install-linux \
-                -DCMAKE_C_COMPILER=gcc-11 \
-                -DCMAKE_CXX_COMPILER=g++-11 \
-                -DCMAKE_CXX_STANDARD=20
+                -DCMAKE_C_COMPILER=gcc \
+                -DCMAKE_CXX_COMPILER=g++ \
+                -DCMAKE_CXX_STANDARD=20 \
+                -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+                -DCMAKE_CXX_EXTENSIONS=OFF
 
-
-              echo "=================================================="
-              echo "Build"
-              echo "=================================================="
+              echo "===== Build ====="
 
               cmake \
                 --build build/linux-container \
                 --parallel
 
-
-              echo "=================================================="
-              echo "Install"
-              echo "=================================================="
-
-              rm -rf build/install-linux
+              echo "===== Install ====="
 
               cmake \
                 --install build/linux-container
 
+              SO=build/install-linux/libzxing_jni.so
 
-              echo "=================================================="
-              echo "Check output"
-              echo "=================================================="
+              test -f "$SO"
 
-              find build/install-linux \
-                -type f \
-                -print
+              echo "===== File information ====="
 
+              file "$SO"
 
-              echo "=================================================="
-              echo "Check library"
-              echo "=================================================="
+              echo "===== Dynamic dependencies ====="
 
-              file \
-                build/install-linux/libzxing_jni.so
+              ldd "$SO" || true
 
+              echo "===== ELF version information ====="
 
-              echo "=================================================="
-              echo "GLIBC ABI"
-              echo "=================================================="
+              readelf --version-info "$SO" || true
 
-              readelf \
-                --version-info \
-                build/install-linux/libzxing_jni.so \
-                || true
-
-
-              echo "=================================================="
-              echo "Detected GLIBC versions"
-              echo "=================================================="
+              echo "===== Detect GLIBC versions ====="
 
               GLIBC_VERSIONS="$(
-                readelf \
-                  --version-info \
-                  build/install-linux/libzxing_jni.so \
-                  2>/dev/null |
+                readelf --version-info "$SO" 2>/dev/null |
                 grep -oE "GLIBC_[0-9]+(\\.[0-9]+)+" |
                 sort -Vu |
                 tr "\n" " "
@@ -372,67 +204,76 @@ jobs:
 
               echo "GLIBC_VERSIONS=$GLIBC_VERSIONS"
 
+              echo "===== Detect GLIBCXX versions ====="
 
-              echo "=================================================="
-              echo "Verify GLIBC <= 2.31"
-              echo "=================================================="
+              GLIBCXX_VERSIONS="$(
+                readelf --version-info "$SO" 2>/dev/null |
+                grep -oE "GLIBCXX_[0-9]+(\\.[0-9]+)+" |
+                sort -Vu |
+                tr "\n" " "
+              )"
+
+              echo "GLIBCXX_VERSIONS=$GLIBCXX_VERSIONS"
+
+              echo "===== Detect CXXABI versions ====="
+
+              CXXABI_VERSIONS="$(
+                readelf --version-info "$SO" 2>/dev/null |
+                grep -oE "CXXABI_[0-9]+(\\.[0-9]+)+" |
+                sort -Vu |
+                tr "\n" " "
+              )"
+
+              echo "CXXABI_VERSIONS=$CXXABI_VERSIONS"
+
+              echo "===== Verify GLIBC <= 2.31 ====="
 
               if echo "$GLIBC_VERSIONS" |
                 grep -qE "GLIBC_(2\\.(3[2-9]|[4-9][0-9]))|GLIBC_([3-9])"; then
 
-                echo "ERROR: libzxing_jni.so requires GLIBC newer than 2.31"
-
+                echo "ERROR: GLIBC version exceeds 2.31"
                 exit 1
-
               fi
-
 
               echo "GLIBC compatibility check passed."
 
+              echo "===== Verify GLIBCXX <= 3.4.28 ====="
 
-              echo "=================================================="
-              echo "Prepare native artifact"
-              echo "=================================================="
+              if echo "$GLIBCXX_VERSIONS" |
+                grep -qE "GLIBCXX_3\\.4\\.([3-9][0-9])|GLIBCXX_3\\.([5-9])"; then
+
+                echo "ERROR: GLIBCXX version exceeds 3.4.28"
+                echo "$GLIBCXX_VERSIONS"
+                exit 1
+              fi
+
+              echo "GLIBCXX compatibility check passed."
+
+              echo "===== Prepare native artifact ====="
 
               mkdir -p native/linux-x86_64
 
               cp \
-                build/install-linux/libzxing_jni.so \
+                "$SO" \
                 native/linux-x86_64/libzxing_jni.so
 
-
-              echo "=================================================="
-              echo "Final native library"
-              echo "=================================================="
-
-              ls -lh \
-                native/linux-x86_64/libzxing_jni.so
+              ls -lh native/linux-x86_64/libzxing_jni.so
 
             '
 
-
-      # --------------------------------------------------------
-      # Upload
-      # --------------------------------------------------------
-
       - name: Upload Linux native artifact
         uses: actions/upload-artifact@v4
-
         with:
           name: native-linux-x86_64
-
           path: native/linux-x86_64
-
           if-no-files-found: error
 
 
-
   # ============================================================
-  # Java Package
+  # Maven Package
   # ============================================================
 
   package:
-
     name: Package Java JARs
 
     needs:
@@ -442,253 +283,115 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-
-      # --------------------------------------------------------
-      # Checkout
-      # --------------------------------------------------------
-
       - name: Checkout
         uses: actions/checkout@v5
 
-
-      # --------------------------------------------------------
-      # Setup JDK 11
-      # --------------------------------------------------------
-
       - name: Setup JDK 11
         uses: actions/setup-java@v5
-
         with:
           distribution: temurin
           java-version: "11"
           cache: maven
 
-
-      # --------------------------------------------------------
-      # Download Windows DLL
-      # --------------------------------------------------------
-
       - name: Download Windows native library
         uses: actions/download-artifact@v4
-
         with:
           name: native-windows-x86_64
           path: src/main/resources/native/windows-x86_64
 
-
-      # --------------------------------------------------------
-      # Download Linux SO
-      # --------------------------------------------------------
-
       - name: Download Linux native library
         uses: actions/download-artifact@v4
-
         with:
           name: native-linux-x86_64
           path: src/main/resources/native/linux-x86_64
 
-
-      # --------------------------------------------------------
-      # Check native resources
-      # --------------------------------------------------------
-
       - name: List native resources
         shell: bash
         run: |
-
-          echo "===== Native resources ====="
-
-          find src/main/resources/native \
-            -type f \
-            -print
-
-
-      # --------------------------------------------------------
-      # Build Maven
-      #
-      # pom.xml 会自动生成：
-      #
-      # 1. main JAR
-      # 2. sources JAR
-      # 3. javadoc JAR
-      # --------------------------------------------------------
+          find src/main/resources/native -type f -print
 
       - name: Build Maven JARs
         shell: bash
         run: |
+          mvn -B -DskipTests clean package
 
-          mvn \
-            -B \
-            -DskipTests \
-            clean \
-            package
-
-
-      # --------------------------------------------------------
-      # Show Maven result
-      # --------------------------------------------------------
-
-      - name: List target
+      - name: Verify JAR outputs
         shell: bash
         run: |
-
-          echo "===== target ====="
-
-          find target \
-            -maxdepth 1 \
-            -type f \
-            -name "*.jar" \
-            -print \
-            -exec ls -lh {} \;
-
-
-      # --------------------------------------------------------
-      # Verify three JARs
-      # --------------------------------------------------------
-
-      - name: Verify JAR files
-        shell: bash
-        run: |
-
           MAIN_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name "*.jar" \
-            ! -name "*-sources.jar" \
-            ! -name "*-javadoc.jar" |
+            -name '*.jar' \
+            ! -name '*-sources.jar' \
+            ! -name '*-javadoc.jar' |
             head -n 1)"
 
           SOURCES_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name "*-sources.jar" |
+            -name '*-sources.jar' |
             head -n 1)"
 
           JAVADOC_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name "*-javadoc.jar" |
+            -name '*-javadoc.jar' |
             head -n 1)"
-
-
-          echo "MAIN_JAR=$MAIN_JAR"
-          echo "SOURCES_JAR=$SOURCES_JAR"
-          echo "JAVADOC_JAR=$JAVADOC_JAR"
-
 
           test -n "$MAIN_JAR"
           test -n "$SOURCES_JAR"
           test -n "$JAVADOC_JAR"
 
+          echo "Main JAR: $MAIN_JAR"
+          echo "Sources JAR: $SOURCES_JAR"
+          echo "Javadoc JAR: $JAVADOC_JAR"
 
-          test -f "$MAIN_JAR"
-          test -f "$SOURCES_JAR"
-          test -f "$JAVADOC_JAR"
+          jar tf "$MAIN_JAR" |
+            grep -Fx "native/windows-x86_64/zxing_jni.dll"
 
+          jar tf "$MAIN_JAR" |
+            grep -Fx "native/linux-x86_64/libzxing_jni.so"
 
-          echo "All three JAR files exist."
+      - name: Upload Maven artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-jars
+          path: target/*.jar
+          if-no-files-found: error
 
-
-      # --------------------------------------------------------
-      # Verify native libraries are inside main JAR
-      # --------------------------------------------------------
-
-      - name: Verify native libraries in JAR
+      - name: Create release package
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
-
-          MAIN_JAR="$(find target \
-            -maxdepth 1 \
-            -type f \
-            -name "*.jar" \
-            ! -name "*-sources.jar" \
-            ! -name "*-javadoc.jar" |
-            head -n 1)"
-
-
-          echo "===== Main JAR ====="
-
-          jar tf "$MAIN_JAR" |
-            grep "^native/"
-
-
-          echo "===== Verify Windows DLL ====="
-
-          jar tf "$MAIN_JAR" |
-            grep -q \
-              "native/windows-x86_64/zxing_jni.dll"
-
-
-          echo "===== Verify Linux SO ====="
-
-          jar tf "$MAIN_JAR" |
-            grep -q \
-              "native/linux-x86_64/libzxing_jni.so"
-
-
-          echo "Native libraries are inside main JAR."
-
-
-      # --------------------------------------------------------
-      # Prepare release archive
-      # --------------------------------------------------------
-
-      - name: Build release archive
-        shell: bash
-        run: |
-
           mkdir -p release
-
 
           cp target/*.jar release/
 
+          cp native/windows-x86_64/zxing_jni.dll \
+            release/zxing_jni-windows-x86_64.dll
 
-          cp \
-            README.md \
-            LICENSE \
-            THIRD_PARTY_LICENSES.md \
-            release/
-
+          cp native/linux-x86_64/libzxing_jni.so \
+            release/libzxing_jni-linux-x86_64.so
 
           cd release
 
+          zip -9 \
+            "../zxing-cpp-jni-${GITHUB_REF_NAME}.zip" \
+            ./*
 
-          zip \
-            -r \
-            "zxing-cpp-jni-${GITHUB_SHA::7}.zip" \
-            .
-
-
-      # --------------------------------------------------------
-      # Upload package artifact
-      # --------------------------------------------------------
-
-      - name: Upload package artifact
+      - name: Upload release package
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
-
         with:
-          name: zxing-cpp-jni-package
-
-          path: |
-            target/*.jar
-            release/*.zip
-
+          name: zxing-cpp-jni-release
+          path: zxing-cpp-jni-${{ github.ref_name }}.zip
           if-no-files-found: error
 
-
-      # --------------------------------------------------------
-      # GitHub Release
-      # --------------------------------------------------------
-
-      - name: Publish GitHub Release
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-
         uses: softprops/action-gh-release@v2
-
         with:
-
           files: |
+            zxing-cpp-jni-${{ github.ref_name }}.zip
             target/*.jar
-            release/*.zip
-
           generate_release_notes: true
