@@ -7,9 +7,7 @@ on:
       - main
     tags:
       - "v*"
-
   pull_request:
-
   workflow_dispatch:
 
 permissions:
@@ -35,6 +33,15 @@ jobs:
           distribution: temurin
           java-version: "11"
 
+      - name: Show environment
+        shell: pwsh
+        run: |
+          Write-Host "===== Environment ====="
+          Write-Host "JAVA_HOME:"
+          Write-Host $env:JAVA_HOME
+          java -version
+          cmake --version
+
       - name: Configure
         shell: pwsh
         run: |
@@ -47,12 +54,26 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build/native --config Release --parallel
+          cmake `
+            --build build/native `
+            --config Release `
+            --parallel
 
       - name: Install
         shell: pwsh
         run: |
-          cmake --install build/native --config Release
+          cmake `
+            --install build/native `
+            --config Release
+
+      - name: List install directory
+        shell: pwsh
+        run: |
+          Write-Host "===== build/install ====="
+          Get-ChildItem `
+            -Path build/install `
+            -Recurse `
+            -File
 
       - name: Prepare Windows native library
         shell: pwsh
@@ -74,21 +95,21 @@ jobs:
           path: native/windows-x86_64
           if-no-files-found: error
 
-
   # ============================================================
   # Linux Native
   #
-  # Build environment:
-  #   Ubuntu 20.04
-  #   glibc 2.31
-  #   GCC 10
+  # Build baseline:
+  #   Ubuntu 20.04 / glibc 2.31
   #
-  # Target GLIBCXX:
-  #   Maximum 3.4.28
+  # Compiler:
+  #   GCC 11 / C++20
+  #
+  # Runtime:
+  #   Static libstdc++ and libgcc
   # ============================================================
 
   native-linux:
-    name: Native Linux x86_64 (glibc 2.31 / GCC 10)
+    name: Native Linux x86_64 (glibc 2.31)
     runs-on: ubuntu-22.04
 
     steps:
@@ -104,50 +125,57 @@ jobs:
             ubuntu:20.04 \
             bash -euxo pipefail -c '
 
+              echo "===== Ubuntu version ====="
+              cat /etc/os-release
+
               export DEBIAN_FRONTEND=noninteractive
 
-              echo "===== Install dependencies ====="
+              echo "===== Install base dependencies ====="
 
               apt-get update
 
               apt-get install -y \
                 ca-certificates \
+                curl \
+                gnupg \
+                software-properties-common \
                 git \
                 build-essential \
-                gcc-10 \
-                g++-10 \
                 binutils \
                 file \
                 openjdk-11-jdk \
                 python3 \
                 python3-pip \
-                ninja-build
+                ninja-build \
+                unzip
 
-              echo "===== Configure environment ====="
+              echo "===== Add Ubuntu Toolchain PPA ====="
+
+              add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+              apt-get update
+
+              echo "===== Install GCC 11 ====="
+
+              apt-get install -y \
+                gcc-11 \
+                g++-11
+
+              echo "===== Compiler ====="
+
+              gcc-11 --version
+              g++-11 --version
+
+              echo "===== Java ====="
+
+              java -version
 
               export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
               export PATH="$JAVA_HOME/bin:$PATH"
 
-              export CC=gcc-10
-              export CXX=g++-10
-
               test -f "$JAVA_HOME/include/jni.h"
 
-              echo "===== GCC version ====="
-
-              gcc-10 --version
-              g++-10 --version
-
-              echo "===== Java version ====="
-
-              java -version
-
-              echo "===== System libstdc++ versions ====="
-
-              strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 \
-                | grep GLIBCXX_ \
-                | sort -Vu \
-                | tail
+              echo "JAVA_HOME=$JAVA_HOME"
 
               echo "===== Install CMake ====="
 
@@ -156,6 +184,15 @@ jobs:
                 "cmake==3.31.6"
 
               cmake --version
+              ninja --version
+
+              echo "===== Compiler environment ====="
+
+              export CC=gcc-11
+              export CXX=g++-11
+
+              echo "CC=$CC"
+              echo "CXX=$CXX"
 
               echo "===== Clean build directory ====="
 
@@ -172,11 +209,12 @@ jobs:
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/workspace/build/install-linux \
-                -DCMAKE_C_COMPILER=gcc-10 \
-                -DCMAKE_CXX_COMPILER=g++-10 \
+                -DCMAKE_C_COMPILER=gcc-11 \
+                -DCMAKE_CXX_COMPILER=g++-11 \
                 -DCMAKE_CXX_STANDARD=20 \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
-                -DCMAKE_CXX_EXTENSIONS=OFF
+                -DCMAKE_CXX_EXTENSIONS=OFF \
+                "-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc"
 
               echo "===== Build ====="
 
@@ -189,86 +227,83 @@ jobs:
               cmake \
                 --install build/linux-container
 
-              SO=build/install-linux/libzxing_jni.so
+              echo "===== Check output ====="
 
-              test -f "$SO"
+              find build/install-linux \
+                -type f \
+                -print
 
-              echo "===== File information ====="
+              LIBRARY=build/install-linux/libzxing_jni.so
 
-              file "$SO"
+              test -f "$LIBRARY"
+
+              file "$LIBRARY"
 
               echo "===== Dynamic dependencies ====="
 
-              ldd "$SO" || true
+              ldd "$LIBRARY"
 
-              echo "===== ELF version information ====="
+              echo "===== Check libstdc++ dependency ====="
 
-              readelf --version-info "$SO" || true
+              if readelf -d "$LIBRARY" | grep -q "libstdc++.so"; then
+                echo "ERROR: libstdc++ is still dynamically linked"
+                exit 1
+              fi
 
-              echo "===== Detect GLIBC versions ====="
+              echo "Static libstdc++ check passed."
+
+              echo "===== Check GLIBC ABI ====="
 
               GLIBC_VERSIONS="$(
-                readelf --version-info "$SO" 2>/dev/null |
-                grep -oE "GLIBC_[0-9]+(\\.[0-9]+)+" |
-                sort -Vu |
-                tr "\n" " "
+                readelf --version-info "$LIBRARY" 2>/dev/null |
+                grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" |
+                sort -Vu
               )"
 
-              echo "GLIBC_VERSIONS=$GLIBC_VERSIONS"
+              echo "$GLIBC_VERSIONS"
 
-              echo "===== Detect GLIBCXX versions ====="
-
-              GLIBCXX_VERSIONS="$(
-                readelf --version-info "$SO" 2>/dev/null |
-                grep -oE "GLIBCXX_[0-9]+(\\.[0-9]+)+" |
-                sort -Vu |
-                tr "\n" " "
+              MAX_GLIBC="$(
+                echo "$GLIBC_VERSIONS" |
+                sort -V |
+                tail -n 1
               )"
 
-              echo "GLIBCXX_VERSIONS=$GLIBCXX_VERSIONS"
+              echo "MAX_GLIBC=$MAX_GLIBC"
 
-              echo "===== Detect CXXABI versions ====="
-
-              CXXABI_VERSIONS="$(
-                readelf --version-info "$SO" 2>/dev/null |
-                grep -oE "CXXABI_[0-9]+(\\.[0-9]+)+" |
-                sort -Vu |
-                tr "\n" " "
-              )"
-
-              echo "CXXABI_VERSIONS=$CXXABI_VERSIONS"
-
-              echo "===== Verify GLIBC <= 2.31 ====="
-
-              if echo "$GLIBC_VERSIONS" |
-                grep -qE "GLIBC_(2\\.(3[2-9]|[4-9][0-9]))|GLIBC_([3-9])"; then
-
-                echo "ERROR: GLIBC version exceeds 2.31"
-                echo "$GLIBC_VERSIONS"
-                exit 1
+              if [ -n "$MAX_GLIBC" ]; then
+                if [ "$(printf "%s\n" "$MAX_GLIBC" GLIBC_2.31 | sort -V | tail -n 1)" != "GLIBC_2.31" ]; then
+                  echo "ERROR: GLIBC requirement exceeds 2.31"
+                  exit 1
+                fi
               fi
 
               echo "GLIBC compatibility check passed."
 
-              echo "===== Verify GLIBCXX <= 3.4.28 ====="
+              echo "===== Check GLIBCXX ABI ====="
 
-              if echo "$GLIBCXX_VERSIONS" |
-                grep -qE "GLIBCXX_3\\.4\\.([3-9][0-9])|GLIBCXX_3\\.([5-9])"; then
+              GLIBCXX_VERSIONS="$(
+                readelf --version-info "$LIBRARY" 2>/dev/null |
+                grep -oE "GLIBCXX_[0-9]+(\.[0-9]+)+" |
+                sort -Vu || true
+              )"
 
-                echo "ERROR: GLIBCXX version exceeds 3.4.28"
+              if [ -n "$GLIBCXX_VERSIONS" ]; then
                 echo "$GLIBCXX_VERSIONS"
+                echo "ERROR: Dynamic GLIBCXX dependency detected"
                 exit 1
               fi
 
-              echo "GLIBCXX compatibility check passed."
+              echo "No dynamic GLIBCXX dependency detected."
 
               echo "===== Prepare native artifact ====="
 
               mkdir -p native/linux-x86_64
 
               cp \
-                "$SO" \
+                "$LIBRARY" \
                 native/linux-x86_64/libzxing_jni.so
+
+              echo "===== Final native library ====="
 
               ls -lh native/linux-x86_64/libzxing_jni.so
 
@@ -281,9 +316,8 @@ jobs:
           path: native/linux-x86_64
           if-no-files-found: error
 
-
   # ============================================================
-  # Maven Package
+  # Java Package
   # ============================================================
 
   package:
@@ -321,90 +355,132 @@ jobs:
       - name: List native resources
         shell: bash
         run: |
-          find src/main/resources/native -type f -print
+          echo "===== Native resources ====="
+          find src/main/resources/native \
+            -type f \
+            -print
 
       - name: Build Maven JARs
         shell: bash
         run: |
-          mvn -B -DskipTests clean package
+          mvn \
+            -B \
+            -DskipTests \
+            clean \
+            package
 
-      - name: Verify JAR outputs
+      - name: List target
+        shell: bash
+        run: |
+          echo "===== target ====="
+          find target \
+            -maxdepth 1 \
+            -type f \
+            -name "*.jar" \
+            -print \
+            -exec ls -lh {} \;
+
+      - name: Verify JAR files
         shell: bash
         run: |
           MAIN_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name '*.jar' \
-            ! -name '*-sources.jar' \
-            ! -name '*-javadoc.jar' |
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" |
             head -n 1)"
 
           SOURCES_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name '*-sources.jar' |
+            -name "*-sources.jar" |
             head -n 1)"
 
           JAVADOC_JAR="$(find target \
             -maxdepth 1 \
             -type f \
-            -name '*-javadoc.jar' |
+            -name "*-javadoc.jar" |
             head -n 1)"
+
+          echo "MAIN_JAR=$MAIN_JAR"
+          echo "SOURCES_JAR=$SOURCES_JAR"
+          echo "JAVADOC_JAR=$JAVADOC_JAR"
 
           test -n "$MAIN_JAR"
           test -n "$SOURCES_JAR"
           test -n "$JAVADOC_JAR"
 
-          echo "Main JAR: $MAIN_JAR"
-          echo "Sources JAR: $SOURCES_JAR"
-          echo "Javadoc JAR: $JAVADOC_JAR"
+          test -f "$MAIN_JAR"
+          test -f "$SOURCES_JAR"
+          test -f "$JAVADOC_JAR"
+
+          echo "All three JAR files exist."
+
+      - name: Verify native libraries in JAR
+        shell: bash
+        run: |
+          MAIN_JAR="$(find target \
+            -maxdepth 1 \
+            -type f \
+            -name "*.jar" \
+            ! -name "*-sources.jar" \
+            ! -name "*-javadoc.jar" |
+            head -n 1)"
+
+          echo "===== Main JAR ====="
 
           jar tf "$MAIN_JAR" |
-            grep -Fx "native/windows-x86_64/zxing_jni.dll"
+            grep "^native/"
+
+          echo "===== Verify Windows DLL ====="
 
           jar tf "$MAIN_JAR" |
-            grep -Fx "native/linux-x86_64/libzxing_jni.so"
+            grep -q \
+              "native/windows-x86_64/zxing_jni.dll"
 
-      - name: Upload Maven artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: java-jars
-          path: target/*.jar
-          if-no-files-found: error
+          echo "===== Verify Linux SO ====="
 
-      - name: Create release package
-        if: startsWith(github.ref, 'refs/tags/v')
+          jar tf "$MAIN_JAR" |
+            grep -q \
+              "native/linux-x86_64/libzxing_jni.so"
+
+          echo "Native libraries are inside main JAR."
+
+      - name: Build release archive
         shell: bash
         run: |
           mkdir -p release
 
           cp target/*.jar release/
 
-          cp native/windows-x86_64/zxing_jni.dll \
-            release/zxing_jni-windows-x86_64.dll
-
-          cp native/linux-x86_64/libzxing_jni.so \
-            release/libzxing_jni-linux-x86_64.so
+          cp \
+            README.md \
+            LICENSE \
+            THIRD_PARTY_LICENSES.md \
+            release/
 
           cd release
 
-          zip -9 \
-            "../zxing-cpp-jni-${GITHUB_REF_NAME}.zip" \
-            ./*
+          zip \
+            -r \
+            "zxing-cpp-jni-${GITHUB_SHA::7}.zip" \
+            .
 
-      - name: Upload release package
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: zxing-cpp-jni-release
-          path: zxing-cpp-jni-${{ github.ref_name }}.zip
+          name: zxing-cpp-jni-package
+          path: |
+            target/*.jar
+            release/*.zip
           if-no-files-found: error
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            zxing-cpp-jni-${{ github.ref_name }}.zip
             target/*.jar
+            release/*.zip
           generate_release_notes: true
