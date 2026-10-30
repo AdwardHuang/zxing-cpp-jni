@@ -15,6 +15,10 @@ import java.util.Objects;
 public final class QrCode implements AutoCloseable {
 
     private long nativeHandle;
+    
+    static {
+        NativeLibraryLoader.loadNativeLibrary();
+    }
 
     private QrCode(long nativeHandle) {
         if (nativeHandle == 0) {

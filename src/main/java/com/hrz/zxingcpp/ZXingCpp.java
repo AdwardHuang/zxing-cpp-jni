@@ -2,13 +2,7 @@ package com.hrz.zxingcpp;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.WritableRaster;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Locale;
 
 public final class ZXingCpp {
 
@@ -39,7 +33,7 @@ public final class ZXingCpp {
 
     /**
      * 默认 ECI。
-     * 对 QrFT 来说推荐使用 3。
+     * 对 QOcr 来说推荐使用 3。
      */
     public static final int DEFAULT_ECI = ECI_ISO_8859_1;
 
@@ -50,82 +44,18 @@ public final class ZXingCpp {
      * 3 = Q
      * 4 = H
      */
-    public static final int DEFAULT_EC_LEVEL = 2;
+    public static final int EC_LEVEL_L = 1;
+    public static final int EC_LEVEL_M = 2;
+    public static final int EC_LEVEL_Q = 3;
+    public static final int EC_LEVEL_H = 4;
+    public static final int DEFAULT_EC_LEVEL = EC_LEVEL_L;
     /**
      * 默认 quiet zone。
      */
     public static final int DEFAULT_QUIET_ZONE = 4;
 
-
-    // ========================================================
-    // Native loading
-    // ========================================================
-
-    private static boolean loaded = false;
-    private static Path nativeTempFile;
-
     static {
-        loadNativeLibrary();
-    }
-
-
-    private static void loadNativeLibrary() {
-
-        if (loaded) {
-            return;
-        }
-
-
-        String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
-        String resource;
-
-
-        if (os.contains("win")) {
-            if (isX86_64(arch)) {
-                resource = "/native/windows-x86_64/zxing_jni.dll";
-            } else {
-                throw new UnsupportedOperationException("Unsupported Windows architecture: " + arch);
-            }
-        } else if (os.contains("linux")) {
-            if (isX86_64(arch)) {
-                resource = "/native/linux-x86_64/libzxing_jni.so";
-
-            } else if (isAarch64(arch)) {
-                resource = "/native/linux-aarch64/libzxing_jni.so";
-            } else {
-                throw new UnsupportedOperationException("Unsupported Linux architecture: " + arch);
-            }
-
-        } else {
-            throw new UnsupportedOperationException("Unsupported operating system: " + os);
-        }
-
-
-        try (InputStream input = ZXingCpp.class.getResourceAsStream(resource)) {
-            if (input == null) {
-                throw new IllegalStateException("Native library not found: " + resource);
-            }
-            String fileName = resource.substring(resource.lastIndexOf('/') + 1);
-            String suffix = fileName.endsWith(".dll") ? ".dll" : ".so";
-            nativeTempFile = Files.createTempFile("zxing_jni_", suffix);
-            Files.copy(input, nativeTempFile, StandardCopyOption.REPLACE_EXISTING);
-            nativeTempFile.toFile().deleteOnExit();
-            System.load(nativeTempFile.toAbsolutePath().toString());
-            loaded = true;
-        }catch (IOException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-    }
-
-
-    private static boolean isX86_64(String arch) {
-        return "amd64".equals(arch) || "x86_64".equals(arch) || "x64".equals(arch);
-    }
-
-
-    private static boolean isAarch64(String arch) {
-        return "aarch64".equals(arch) || "arm64".equals(arch);
+        NativeLibraryLoader.loadNativeLibrary();
     }
 
 
