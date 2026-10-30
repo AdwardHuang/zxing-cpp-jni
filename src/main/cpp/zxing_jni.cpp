@@ -1194,3 +1194,420 @@ Java_com_hrz_zxingcpp_ZXingCpp_nativeVersion(
             ZXing::Version().c_str()
     );
 }
+
+// ============================================================
+// QrCode native handle API
+// ============================================================
+
+namespace
+{
+
+struct QrCodeHandle
+{
+    ZXing::Barcode barcode;
+};
+
+QrCodeHandle* GetQrCodeHandle(
+        JNIEnv* env,
+        jlong handle)
+{
+    if (handle == 0) {
+        ThrowIllegalState(env, "QrCode has already been closed");
+        return nullptr;
+    }
+
+    return reinterpret_cast<QrCodeHandle*>(handle);
+}
+
+int ParseQrMetadata(
+        const ZXing::Barcode& barcode,
+        const char* key)
+{
+    const std::string value = barcode.extra(key);
+
+    if (value.empty()) {
+        return -1;
+    }
+
+    try {
+        return std::stoi(value);
+    }
+    catch (...) {
+        return -1;
+    }
+}
+
+} // namespace
+
+
+// ============================================================
+// Create QR Code
+// ============================================================
+
+extern "C"
+JNIEXPORT jlong JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeCreateQrCode(
+        JNIEnv* env,
+        jclass,
+        jbyteArray dataArray,
+        jint ecLevel,
+        jint eci)
+{
+    if (dataArray == nullptr) {
+        ThrowIllegalArgument(env, "data == null");
+        return 0;
+    }
+
+    if (ecLevel < 1 || ecLevel > 4) {
+        ThrowIllegalArgument(
+                env,
+                "ecLevel must be 1(L), 2(M), 3(Q), or 4(H)"
+        );
+        return 0;
+    }
+
+    if (eci < 0 || eci > 999999) {
+        ThrowIllegalArgument(
+                env,
+                "ECI must be between 0 and 999999"
+        );
+        return 0;
+    }
+
+    const jsize dataLength = env->GetArrayLength(dataArray);
+
+    if (dataLength <= 0) {
+        ThrowIllegalArgument(env, "data is empty");
+        return 0;
+    }
+
+    jbyte* data = env->GetByteArrayElements(dataArray, nullptr);
+
+    if (data == nullptr) {
+        return 0;
+    }
+
+    try {
+        std::string options;
+
+        switch (ecLevel) {
+            case 1:
+                options = "ecLevel=L";
+                break;
+
+            case 2:
+                options = "ecLevel=M";
+                break;
+
+            case 3:
+                options = "ecLevel=Q";
+                break;
+
+            case 4:
+                options = "ecLevel=H";
+                break;
+
+            default:
+                ThrowIllegalArgument(env, "Invalid EC level");
+                env->ReleaseByteArrayElements(
+                        dataArray,
+                        data,
+                        JNI_ABORT
+                );
+                return 0;
+        }
+
+        options += ",eci=";
+        options += std::to_string(eci);
+
+        ZXing::CreatorOptions creatorOptions(
+                ZXing::BarcodeFormat::QRCode,
+                options
+        );
+
+        ZXing::Barcode barcode =
+                ZXing::CreateBarcodeFromBytes(
+                        reinterpret_cast<const uint8_t*>(data),
+                        static_cast<int>(dataLength),
+                        creatorOptions
+                );
+
+        env->ReleaseByteArrayElements(
+                dataArray,
+                data,
+                JNI_ABORT
+        );
+
+        data = nullptr;
+
+        if (!barcode.isValid()) {
+            ThrowIllegalState(
+                    env,
+                    barcode.error().msg()
+            );
+            return 0;
+        }
+
+        const ZXing::ImageView symbol = barcode.symbol();
+
+        if (symbol.data() == nullptr ||
+                symbol.width() <= 0 ||
+                symbol.height() <= 0) {
+            ThrowIllegalState(
+                    env,
+                    "ZXing-C++ returned an invalid QR symbol"
+            );
+            return 0;
+        }
+
+        QrCodeHandle* handle = new QrCodeHandle{
+                std::move(barcode)
+        };
+
+        return reinterpret_cast<jlong>(handle);
+    }
+    catch (const std::exception& e) {
+        if (data != nullptr) {
+            env->ReleaseByteArrayElements(
+                    dataArray,
+                    data,
+                    JNI_ABORT
+            );
+        }
+
+        ThrowIllegalState(env, e.what());
+        return 0;
+    }
+    catch (...) {
+        if (data != nullptr) {
+            env->ReleaseByteArrayElements(
+                    dataArray,
+                    data,
+                    JNI_ABORT
+            );
+        }
+
+        ThrowIllegalState(env, "Unknown native exception");
+        return 0;
+    }
+}
+
+
+// ============================================================
+// Destroy QR Code
+// ============================================================
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeDestroyQrCode(
+        JNIEnv*,
+        jclass,
+        jlong handle)
+{
+    if (handle == 0) {
+        return;
+    }
+
+    delete reinterpret_cast<QrCodeHandle*>(handle);
+}
+
+
+// ============================================================
+// QR module count
+// ============================================================
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeSize(
+        JNIEnv* env,
+        jclass,
+        jlong handle)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return 0;
+    }
+
+    const ZXing::ImageView symbol = qr->barcode.symbol();
+
+    return symbol.width();
+}
+
+
+// ============================================================
+// QR version
+// ============================================================
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeVersion(
+        JNIEnv* env,
+        jclass,
+        jlong handle)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return -1;
+    }
+
+    return ParseQrMetadata(
+            qr->barcode,
+            ZXing::BarcodeExtra::Version
+    );
+}
+
+
+// ============================================================
+// QR error correction
+// ============================================================
+
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeErrorCorrection(
+        JNIEnv* env,
+        jclass,
+        jlong handle)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return nullptr;
+    }
+
+    const std::string value = qr->barcode.extra(
+            ZXing::BarcodeExtra::ECLevel
+    );
+
+    return env->NewStringUTF(value.c_str());
+}
+
+
+// ============================================================
+// QR mask
+// ============================================================
+
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeMask(
+        JNIEnv* env,
+        jclass,
+        jlong handle)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return -1;
+    }
+
+    return ParseQrMetadata(
+            qr->barcode,
+            ZXing::BarcodeExtra::DataMask
+    );
+}
+
+
+// ============================================================
+// Query module color
+// ============================================================
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeIsDark(
+        JNIEnv* env,
+        jclass,
+        jlong handle,
+        jint x,
+        jint y)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return JNI_FALSE;
+    }
+
+    const ZXing::ImageView symbol = qr->barcode.symbol();
+
+    if (x < 0 || x >= symbol.width() ||
+            y < 0 || y >= symbol.height()) {
+        ThrowIllegalArgument(env, "QR module coordinates out of bounds");
+        return JNI_FALSE;
+    }
+
+    const uint8_t value = symbol.data()[
+            y * symbol.rowStride() +
+            x * symbol.pixStride()
+    ];
+
+    return value < 128 ? JNI_TRUE : JNI_FALSE;
+}
+
+
+// ============================================================
+// Render QR Code
+// ============================================================
+
+extern "C"
+JNIEXPORT jbyteArray JNICALL
+Java_com_hrz_zxingcpp_QrCode_nativeQrCodeRender(
+        JNIEnv* env,
+        jclass,
+        jlong handle,
+        jint moduleSize,
+        jint quietZone)
+{
+    QrCodeHandle* qr = GetQrCodeHandle(env, handle);
+
+    if (qr == nullptr) {
+        return nullptr;
+    }
+
+    if (moduleSize <= 0) {
+        ThrowIllegalArgument(env, "moduleSize must be > 0");
+        return nullptr;
+    }
+
+    if (quietZone < 0) {
+        ThrowIllegalArgument(env, "quietZone must be >= 0");
+        return nullptr;
+    }
+
+    try {
+        const ZXing::ImageView symbol = qr->barcode.symbol();
+
+        const int moduleCount = symbol.width();
+
+        const int64_t side64 =
+                (static_cast<int64_t>(moduleCount) +
+                 static_cast<int64_t>(quietZone) * 2) *
+                static_cast<int64_t>(moduleSize);
+
+        if (side64 <= 0 || side64 > 46340) {
+            ThrowIllegalArgument(
+                    env,
+                    "Rendered QR image dimensions are too large"
+            );
+            return nullptr;
+        }
+
+        const int side = static_cast<int>(side64);
+
+        const std::vector<uint8_t> image = RenderQRCode(
+                symbol,
+                side,
+                side,
+                quietZone
+        );
+
+        return VectorToByteArray(env, image);
+    }
+    catch (const std::exception& e) {
+        ThrowIllegalState(env, e.what());
+        return nullptr;
+    }
+    catch (...) {
+        ThrowIllegalState(env, "Unknown native exception");
+        return nullptr;
+    }
+}
