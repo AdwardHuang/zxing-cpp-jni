@@ -1438,7 +1438,6 @@ Java_com_hrz_zxingcpp_QrCode_nativeQrCodeSize(
 // ============================================================
 // QR version
 // ============================================================
-
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_hrz_zxingcpp_QrCode_nativeQrCodeVersion(
@@ -1452,10 +1451,27 @@ Java_com_hrz_zxingcpp_QrCode_nativeQrCodeVersion(
         return -1;
     }
 
-    return ParseQrMetadata(
-            qr->barcode,
-            ZXing::BarcodeExtra::Version
-    );
+    const ZXing::ImageView symbol = qr->barcode.symbol();
+
+    if (symbol.data() == nullptr ||
+        symbol.width() != symbol.height()) {
+        return -1;
+    }
+
+    const int moduleCount = symbol.width();
+
+    /*
+     * QR Code Model 2:     *
+     * moduleCount = 17 + 4 * version     *
+     * version = (moduleCount - 17) / 4
+     */
+    if (moduleCount < 21 ||
+        moduleCount > 177 ||
+        (moduleCount - 17) % 4 != 0) {
+        return -1;
+    }
+
+    return (moduleCount - 17) / 4;
 }
 
 
