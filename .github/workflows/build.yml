@@ -78,19 +78,17 @@ jobs:
   # ============================================================
   # Linux Native
   #
-  # Build baseline:
+  # Build environment:
   #   Ubuntu 20.04
   #   glibc 2.31
-  #   GCC 9
+  #   GCC 10
   #
-  # Target machine:
-  #   GLIBCXX_3.4.28
-  #
-  # Avoid GCC 11 because it may introduce GLIBCXX_3.4.29.
+  # Target GLIBCXX:
+  #   Maximum 3.4.28
   # ============================================================
 
   native-linux:
-    name: Native Linux x86_64 (glibc 2.31 / GCC 9)
+    name: Native Linux x86_64 (glibc 2.31 / GCC 10)
     runs-on: ubuntu-22.04
 
     steps:
@@ -116,6 +114,8 @@ jobs:
                 ca-certificates \
                 git \
                 build-essential \
+                gcc-10 \
+                g++-10 \
                 binutils \
                 file \
                 openjdk-11-jdk \
@@ -128,14 +128,26 @@ jobs:
               export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
               export PATH="$JAVA_HOME/bin:$PATH"
 
-              export CC=gcc
-              export CXX=g++
+              export CC=gcc-10
+              export CXX=g++-10
 
               test -f "$JAVA_HOME/include/jni.h"
 
-              gcc --version
-              g++ --version
+              echo "===== GCC version ====="
+
+              gcc-10 --version
+              g++-10 --version
+
+              echo "===== Java version ====="
+
               java -version
+
+              echo "===== System libstdc++ versions ====="
+
+              strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 \
+                | grep GLIBCXX_ \
+                | sort -Vu \
+                | tail
 
               echo "===== Install CMake ====="
 
@@ -160,8 +172,8 @@ jobs:
                 -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX=/workspace/build/install-linux \
-                -DCMAKE_C_COMPILER=gcc \
-                -DCMAKE_CXX_COMPILER=g++ \
+                -DCMAKE_C_COMPILER=gcc-10 \
+                -DCMAKE_CXX_COMPILER=g++-10 \
                 -DCMAKE_CXX_STANDARD=20 \
                 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
                 -DCMAKE_CXX_EXTENSIONS=OFF
@@ -232,6 +244,7 @@ jobs:
                 grep -qE "GLIBC_(2\\.(3[2-9]|[4-9][0-9]))|GLIBC_([3-9])"; then
 
                 echo "ERROR: GLIBC version exceeds 2.31"
+                echo "$GLIBC_VERSIONS"
                 exit 1
               fi
 
