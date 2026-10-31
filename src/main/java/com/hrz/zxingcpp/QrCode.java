@@ -66,6 +66,18 @@ public final class QrCode implements AutoCloseable {
     }
 
     /**
+     * 使用指定编码选项生成 QR Code。
+     *
+     * @param data 原始数据
+     * @param options 编码选项
+     * @return QR Code 对象
+     */
+    public static QrCode encode(byte[] data, QrOptions options) {
+        Objects.requireNonNull(options, "options");
+        return encode(data, options.errorCorrection().value(), options.eci());
+    }
+
+    /**
      * UTF-8 + ECI 26。
      */
     public static QrCode encodeUtf8(String text) {

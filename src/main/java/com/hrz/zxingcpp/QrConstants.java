@@ -1,5 +1,8 @@
 package com.hrz.zxingcpp;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
 /**
  * Qr使用到的常量
  * @author HRZ
@@ -22,7 +25,16 @@ public class QrConstants {
     /**
      * UTF-8。
      */
-    public static final int ECI_UTF8 = 26;
+    public static final int ECI_UTF8 = 26;/**
+     * GBK。
+     */
+    public static final int ECI_GBK = 31;
+
+    /**
+     * GB18030。
+     */
+    public static final int ECI_GB18030 = 32;
+    
     /**
      * 8-bit binary。
      */
@@ -43,4 +55,14 @@ public class QrConstants {
      * 默认 quiet zone。
      */
     public static final int DEFAULT_QUIET_ZONE = 4;
+     
+    public static int toEci(Charset charset){
+        int eci = ECI_BINARY;
+        if (StandardCharsets.ISO_8859_1 == charset){
+            eci = ECI_ISO_8859_1;
+        } else if (StandardCharsets.UTF_8 == charset){
+            eci = ECI_UTF8;
+        }
+        return eci;
+    }
 }
