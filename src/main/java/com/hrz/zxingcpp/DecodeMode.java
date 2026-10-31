@@ -3,6 +3,7 @@ package com.hrz.zxingcpp;
 
 /**
  * 解码策略。
+ * @author HRZ
  */
 public enum DecodeMode {
 

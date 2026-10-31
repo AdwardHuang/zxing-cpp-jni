@@ -6,6 +6,7 @@ import java.util.Objects;
 
 /**
  * 多格式条码读取器。
+ * @author HRZ
  */
 public final class BarcodeReader {
 
@@ -96,6 +97,15 @@ public final class BarcodeReader {
      */
     public static BarcodeHit readFirst(BufferedImage image) {
         BarcodeHit[] hits = read(image);
+        return hits.length == 0 ? null : hits[0];
+    }
+
+    /**
+     * 快速识别返回第一个识别结果,仅识别二维码，没有结果时返回 null。
+     */
+    public static BarcodeHit readFast(BufferedImage image) {
+        ReadOptions options = new ReadOptions().setDecodeMode(DecodeMode.FAST).setSymbologies(Symbology.QR_CODE).setMaxSymbols(1);
+        BarcodeHit[] hits = read(image, options);
         return hits.length == 0 ? null : hits[0];
     }
 

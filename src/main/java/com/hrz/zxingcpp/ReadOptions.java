@@ -5,11 +5,12 @@ import java.util.Arrays;
 
 /**
  * 条码读取参数。
+ * @author HRZ
  */
 public final class ReadOptions {
 
     private Symbology[] symbologies = {Symbology.ALL};
-    private DecodeMode decodeMode = DecodeMode.NORMAL;
+    private DecodeMode decodeMode = DecodeMode.FAST;
     private boolean tryRotate = true;
     private boolean tryInvert = true;
     private boolean tryDownscale = true;

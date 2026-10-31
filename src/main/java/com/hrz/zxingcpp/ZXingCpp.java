@@ -8,61 +8,12 @@ public final class ZXingCpp {
 
     private ZXingCpp() {
     }
-
-
-    // ========================================================
-    // ECI constants
-    // ========================================================
-
-    /**
-     * ISO-8859-1。
-     * 对 byte[0..255] 可以做到一一映射。
-     * 适合 QrFT / 二进制数据兼容模式。
-     */
-    public static final int ECI_ISO_8859_1 = 3;
-
-    /**
-     * UTF-8。
-     */
-    public static final int ECI_UTF8 = 26;
-
-    /**
-     * 8-bit binary。
-     */
-    public static final int ECI_BINARY = 899;
-
-    /**
-     * 默认 ECI。
-     * 对 QOcr 来说推荐使用 3。
-     */
-    public static final int DEFAULT_ECI = ECI_ISO_8859_1;
-
-    /**
-     * 默认 QR Error Correction。
-     * 1 = L
-     * 2 = M
-     * 3 = Q
-     * 4 = H
-     */
-    public static final int EC_LEVEL_L = 1;
-    public static final int EC_LEVEL_M = 2;
-    public static final int EC_LEVEL_Q = 3;
-    public static final int EC_LEVEL_H = 4;
-    public static final int DEFAULT_EC_LEVEL = EC_LEVEL_L;
-    /**
-     * 默认 quiet zone。
-     */
-    public static final int DEFAULT_QUIET_ZONE = 4;
-
     static {
         NativeLibraryLoader.loadNativeLibrary();
     }
-
-
     // ========================================================
     // DecodeResult
     // ========================================================
-
     public static final class DecodeResult {
 
         private final byte[] bytes;
@@ -70,7 +21,6 @@ public final class ZXingCpp {
         private final int eci;
         private final String charset;
         private final String text;
-
 
         public DecodeResult(byte[] bytes, boolean hasECI, int eci, String charset, String text) {
             this.bytes = bytes == null ? new byte[0] : bytes;
@@ -80,40 +30,27 @@ public final class ZXingCpp {
             this.text = text;
         }
 
-
         public byte[] getBytes() {
             return bytes;
         }
-
-
         public boolean hasECI() {
             return hasECI;
         }
-
-
         public int getECI() {
             return eci;
         }
-
-
         public String getCharset() {
             return charset;
         }
-
-
         public String getText() {
             return text;
         }
-
-
         /**
          * 按指定 charset 将 bytes 转成 String。
          */
         public String decodeString(String charsetName) {
             return new String(bytes, java.nio.charset.Charset.forName(charsetName));
         }
-
-
         @Override
         public String toString() {
             return "DecodeResult{bytes=" + bytes.length + ", hasECI=" + hasECI + ", eci=" + eci + ", charset='" + charset + '\'' + ", text='" + text + '\'' + '}';
@@ -163,7 +100,6 @@ public final class ZXingCpp {
         return decodeBytes(rgba, width, height, width * 4, true, true);
     }
 
-
     /**
      * 兼容旧 API。
      */
@@ -175,7 +111,6 @@ public final class ZXingCpp {
         return result.getText();
     }
 
-
     /**
      * ISO-8859-1 兼容模式。
      */
@@ -186,7 +121,6 @@ public final class ZXingCpp {
         }
         return new String(result.getBytes(), StandardCharsets.ISO_8859_1);
     }
-
 
     // ========================================================
     // Encode byte[]
@@ -201,30 +135,27 @@ public final class ZXingCpp {
      * 推荐 QrFT 使用。
      */
     public static byte[] encodeBytes(byte[] data, int width, int height) {
-        return encodeBytes(data, width, height, DEFAULT_QUIET_ZONE, DEFAULT_EC_LEVEL, DEFAULT_ECI);
+        return encodeBytes(data, width, height, QrConstants.DEFAULT_QUIET_ZONE, QrConstants.DEFAULT_EC_LEVEL, QrConstants.DEFAULT_ECI);
     }
-
 
     /**
      * 指定 quietZone / EC。
-     *
+     * <p>
      * 默认 ECI=3。
      */
     public static byte[] encodeBytes(byte[] data, int width, int height, int quietZone, int ecLevel) {
-        return encodeBytes(data, width, height, quietZone, ecLevel, DEFAULT_ECI);
+        return encodeBytes(data, width, height, quietZone, ecLevel, QrConstants.DEFAULT_ECI);
     }
-
 
     /**
      * 完整编码接口。
      *
-     * @param data       原始数据
-     * @param width      输出图片宽度
-     * @param height     输出图片高度
-     * @param quietZone  QR quiet zone，单位 module
-     * @param ecLevel    1=L, 2=M, 3=Q, 4=H
-     * @param eci        ECI，例如 3 / 26 / 899
-     *
+     * @param data      原始数据
+     * @param width     输出图片宽度
+     * @param height    输出图片高度
+     * @param quietZone QR quiet zone，单位 module
+     * @param ecLevel   1=L, 2=M, 3=Q, 4=H
+     * @param eci       ECI，例如 3 / 26 / 899
      * @return 8-bit grayscale image
      */
     public static byte[] encodeBytes(byte[] data, int width, int height, int quietZone, int ecLevel, int eci) {
@@ -232,28 +163,24 @@ public final class ZXingCpp {
         return nativeEncodeBytes(data, width, height, quietZone, ecLevel, eci);
     }
 
-
     // ========================================================
     // Encode BufferedImage
     // ========================================================
-
     /**
      * 默认：
-     *
+     * <p>
      * ECI=3
      */
     public static BufferedImage encodeImage(byte[] data, int width, int height) {
-        return encodeImage(data, width, height, DEFAULT_QUIET_ZONE, DEFAULT_EC_LEVEL, DEFAULT_ECI);
+        return encodeImage(data, width, height, QrConstants.DEFAULT_QUIET_ZONE, QrConstants.DEFAULT_EC_LEVEL, QrConstants.DEFAULT_ECI);
     }
-
 
     /**
      * ECI=3。
      */
     public static BufferedImage encodeImage(byte[] data, int width, int height, int quietZone, int ecLevel) {
-        return encodeImage(data, width, height, quietZone, ecLevel, DEFAULT_ECI);
+        return encodeImage(data, width, height, quietZone, ecLevel, QrConstants.DEFAULT_ECI);
     }
-
 
     /**
      * 完整版本。
@@ -266,7 +193,6 @@ public final class ZXingCpp {
         return image;
     }
 
-
     // ========================================================
     // UTF-8
     // ========================================================
@@ -278,61 +204,44 @@ public final class ZXingCpp {
         if (text == null) {
             throw new IllegalArgumentException("text == null");
         }
-        return encodeImage(text.getBytes(StandardCharsets.UTF_8), width, height, DEFAULT_QUIET_ZONE, DEFAULT_EC_LEVEL, ECI_UTF8);
+        return encodeImage(text.getBytes(StandardCharsets.UTF_8), width, height, QrConstants.DEFAULT_QUIET_ZONE, QrConstants.DEFAULT_EC_LEVEL, QrConstants.ECI_UTF8);
     }
-
 
     /**
      * ISO-8859-1 + ECI 3。
      * byte[] 一一映射。
      */
     public static BufferedImage encodeBytesCompatible(byte[] data, int width, int height) {
-        return encodeImage(data, width, height, DEFAULT_QUIET_ZONE, DEFAULT_EC_LEVEL, ECI_ISO_8859_1);
+        return encodeImage(data, width, height, QrConstants.DEFAULT_QUIET_ZONE, QrConstants.DEFAULT_EC_LEVEL, QrConstants.ECI_ISO_8859_1);
     }
-
 
     /**
      * Binary + ECI 899。
      */
     public static BufferedImage encodeBinary(byte[] data, int width, int height) {
-        return encodeImage(data, width, height, DEFAULT_QUIET_ZONE, DEFAULT_EC_LEVEL, ECI_BINARY);
+        return encodeImage(data, width, height, QrConstants.DEFAULT_QUIET_ZONE, QrConstants.DEFAULT_EC_LEVEL, QrConstants.ECI_BINARY);
     }
-
 
     // ========================================================
     // Validation
     // ========================================================
-
     private static void validateEncodeArguments(byte[] data, int width, int height, int quietZone, int ecLevel, int eci) {
         if (data == null) {
             throw new IllegalArgumentException("data == null");
         }
-
-
         if (data.length == 0) {
             throw new IllegalArgumentException("data is empty");
         }
-
-
-        if (width <= 0 || height <= 0)
-        {
+        if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("width/height must be > 0");
         }
-
-
         if (quietZone < 0) {
             throw new IllegalArgumentException("quietZone must be >= 0");
         }
-
-
-        if (ecLevel < 1 || ecLevel > 4)
-        {
+        if (ecLevel < 1 || ecLevel > 4) {
             throw new IllegalArgumentException("ecLevel must be 1(L), 2(M), 3(Q), 4(H)");
         }
-
-
-        if (eci < 0 || eci > 999999)
-        {
+        if (eci < 0 || eci > 999999) {
             throw new IllegalArgumentException("ECI must be between 0 and 999999");
         }
     }
@@ -342,8 +251,7 @@ public final class ZXingCpp {
     // Version
     // ========================================================
 
-    public static String version()
-    {
+    public static String version() {
         return nativeVersion();
     }
 

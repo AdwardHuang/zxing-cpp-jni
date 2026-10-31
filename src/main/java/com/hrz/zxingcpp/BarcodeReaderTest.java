@@ -75,8 +75,8 @@ public final class BarcodeReaderTest {
                 IMAGE_SIZE,
                 IMAGE_SIZE,
                 4,
-                ZXingCpp.EC_LEVEL_M,
-                ZXingCpp.ECI_ISO_8859_1
+                QrConstants.EC_LEVEL_M,
+                QrConstants.ECI_ISO_8859_1
         );
 
         check(image != null, "QR image is null");
@@ -129,8 +129,8 @@ public final class BarcodeReaderTest {
                 IMAGE_SIZE,
                 IMAGE_SIZE,
                 4,
-                ZXingCpp.EC_LEVEL_M,
-                ZXingCpp.ECI_UTF8
+                QrConstants.EC_LEVEL_M,
+                QrConstants.ECI_UTF8
         );
 
         byte[] rgba = toRgba(image);
