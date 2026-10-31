@@ -1,5 +1,7 @@
 package com.hrz.zxingcpp;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -14,6 +16,10 @@ import java.util.Objects;
  */
 public final class QrOptions {
 
+    /**
+     * 默认级别为 L
+     * 默认ECI为 ECI_ISO_8859_1
+     */
     private static final QrOptions DEFAULTS = new QrOptions(
             QrErrorCorrection.L,
             QrConstants.DEFAULT_ECI
@@ -105,6 +111,18 @@ public final class QrOptions {
      */
     public QrErrorCorrection errorCorrection() {
         return errorCorrection;
+    }
+    
+    public Charset charset(){
+        switch (eci){
+            case QrConstants.ECI_UTF8 -> {
+                return StandardCharsets.UTF_8;
+            }
+            case QrConstants.ECI_ISO_8859_1 -> {
+                return StandardCharsets.ISO_8859_1;
+            }
+            default -> throw new IllegalStateException("Unexpected value: " + eci);
+        }
     }
 
     /**
