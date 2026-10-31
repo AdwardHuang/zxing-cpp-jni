@@ -1,4 +1,8 @@
-package com.hrz.zxingcpp;
+package com.hrz.zxingcpp.test;
+
+import com.hrz.zxingcpp.QrCode;
+import com.hrz.zxingcpp.QrConstants;
+import com.hrz.zxingcpp.ZXingCpp;
 
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;

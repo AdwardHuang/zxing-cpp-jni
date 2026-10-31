@@ -9,23 +9,19 @@ import java.util.Locale;
 
 /**
  * ZXing-C++ JNI 动态库加载器。
- *
+ * <p>
  * 保证整个 Java 包只负责加载一次 native library。
  */
 final class NativeLibraryLoader {
 
     private static boolean loaded = false;
-
     private NativeLibraryLoader() {
     }
-
     static synchronized void load() {
         if (loaded) {
             return;
         }
-
         loadNativeLibrary();
-
         loaded = true;
     }
 
@@ -34,13 +30,9 @@ final class NativeLibraryLoader {
         if (loaded) {
             return;
         }
-
-
         String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
         String resource;
-
-
         if (os.contains("win")) {
             if (isX86_64(arch)) {
                 resource = "/native/windows-x86_64/zxing_jni.dll";
@@ -73,7 +65,7 @@ final class NativeLibraryLoader {
             nativeTempFile.toFile().deleteOnExit();
             System.load(nativeTempFile.toAbsolutePath().toString());
             loaded = true;
-        }catch (IOException e) {
+        } catch (IOException e) {
             throw new ExceptionInInitializerError(e);
         }
     }

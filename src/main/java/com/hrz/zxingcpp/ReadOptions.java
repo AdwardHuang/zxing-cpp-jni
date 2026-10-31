@@ -21,7 +21,7 @@ public final class ReadOptions {
             true,
             true,
             false,
-            10
+            1
     );
 
     private final Symbology[] symbologies;

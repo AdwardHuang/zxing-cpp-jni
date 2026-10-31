@@ -3,8 +3,8 @@ package com.hrz.zxingcpp;
 
 /**
  * ZXing-C++ 3.1.1 支持的条码格式。
- *
  * nativeName 必须与 ZXing::BarcodeFormat 的名称一致。
+ * @author HRZ
  */
 public enum Symbology {
 

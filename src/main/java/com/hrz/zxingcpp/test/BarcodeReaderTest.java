@@ -1,5 +1,7 @@
 
-package com.hrz.zxingcpp;
+package com.hrz.zxingcpp.test;
+
+import com.hrz.zxingcpp.*;
 
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
